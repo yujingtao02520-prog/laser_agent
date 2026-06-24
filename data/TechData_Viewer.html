@@ -288,12 +288,18 @@
 
     <!-- JSON modal viewer -->
     <div id="jsonModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 700px;">
             <div class="modal-header">
-                <h2 id="modal-title">完整工艺 JSON 结构</h2>
+                <h2 id="modal-title">工艺参数详情</h2>
                 <span class="close" onclick="closeModal()">&times;</span>
             </div>
-            <pre id="json-renderer"></pre>
+            <div id="detail-panel" style="margin-bottom: 20px;">
+                <!-- Populated by JS -->
+            </div>
+            <details>
+                <summary style="cursor: pointer; color: var(--accent-color); font-size: 13px; font-weight: 500; margin-bottom: 8px; outline: none;">显示/隐藏 原始 JSON 数据</summary>
+                <pre id="json-renderer" style="max-height: 250px; overflow-y: auto; font-size: 11px;"></pre>
+            </details>
         </div>
     </div>
 
@@ -408,6 +414,40 @@
             const recipe = rawData.find(r => r.id === id);
             if (recipe) {
                 document.getElementById('modal-title').textContent = recipe.name;
+                
+                // Render structured panel
+                const detailPanel = document.getElementById('detail-panel');
+                detailPanel.innerHTML = `
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 10px; color: var(--text-main);">
+                        <div style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+                            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold; border-left: 2px solid var(--accent-color); padding-left: 6px;">基础参数</div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;"><span>材质:</span><strong style="color: var(--accent-color);">${recipe.material}</strong></div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;"><span>厚度:</span><strong>${recipe.thickness} mm</strong></div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;"><span>气体:</span><strong>${recipe.gas_type}</strong></div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px;"><span>喷嘴:</span><strong>${recipe.nozzle}</strong></div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+                            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold; border-left: 2px solid var(--accent-color); padding-left: 6px;">切割参数</div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;"><span>激光功率:</span><strong>${recipe.power} W</strong></div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;"><span>切割速度:</span><strong>${recipe.speed} mm/min</strong></div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;"><span>气体气压:</span><strong>${recipe.pressure} bar</strong></div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px;"><span>焦点位置:</span><strong>${recipe.focus} mm</strong></div>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px; color: var(--text-main);">
+                        <div style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+                            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold; border-left: 2px solid var(--accent-color); padding-left: 6px;">脉冲调节</div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;"><span>占空比:</span><strong>${recipe.duty_cycle}%</strong></div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px;"><span>脉冲频率:</span><strong>${recipe.frequency} Hz</strong></div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+                            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-weight: bold; border-left: 2px solid var(--accent-color); padding-left: 6px;">其它信息</div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;"><span>工艺记录ID:</span><strong>${recipe.id}</strong></div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px;"><span>保存时间:</span><strong>${recipe.raw_json ? (recipe.raw_json.strSaveTime || '-') : '-'}</strong></div>
+                        </div>
+                    </div>
+                `;
+                
                 document.getElementById('json-renderer').textContent = JSON.stringify(recipe.raw_json, null, 2);
                 document.getElementById('jsonModal').style.display = "block";
             }

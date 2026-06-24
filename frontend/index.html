@@ -340,6 +340,7 @@
                                             <th>速度</th>
                                             <th>气体</th>
                                             <th>焦点</th>
+                                            <th>详情</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -406,6 +407,51 @@
                 </div>
 
             </section>
+        </div>
+    </div>
+
+    <!-- DETAIL MODAL -->
+    <div id="detail-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-card glass-card">
+            <div class="modal-header">
+                <h3>📋 工艺参数详情</h3>
+                <button class="close-btn" id="close-detail-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="detail-section">
+                    <h4 class="section-title">基础配置</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item"><span class="label">材质:</span><span class="value" id="detail-material">-</span></div>
+                        <div class="detail-item"><span class="label">厚度:</span><span class="value" id="detail-thickness">-</span></div>
+                        <div class="detail-item"><span class="label">喷嘴规格:</span><span class="value" id="detail-nozzle">-</span></div>
+                        <div class="detail-item"><span class="label">穿孔方式:</span><span class="value" id="detail-piercing">-</span></div>
+                    </div>
+                </div>
+                
+                <div class="detail-section">
+                    <h4 class="section-title">切割工艺参数</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item"><span class="label">激光功率:</span><span class="value" id="detail-power">-</span></div>
+                        <div class="detail-item"><span class="label">切割速度:</span><span class="value" id="detail-speed">-</span></div>
+                        <div class="detail-item"><span class="label">辅助气体:</span><span class="value" id="detail-gas">-</span></div>
+                        <div class="detail-item"><span class="label">气体气压:</span><span class="value" id="detail-pressure">-</span></div>
+                        <div class="detail-item"><span class="label">焦点位置:</span><span class="value" id="detail-focus">-</span></div>
+                        <div class="detail-item"><span class="label">割缝补偿:</span><span class="value" id="detail-compensation">-</span></div>
+                    </div>
+                </div>
+                
+                <div class="detail-section">
+                    <h4 class="section-title">评估与备注</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item"><span class="label">工艺品质得分:</span><span class="value" id="detail-quality">-</span></div>
+                        <div class="detail-item"><span class="label">主要缺陷类型:</span><span class="value" id="detail-defect">-</span></div>
+                    </div>
+                    <div class="detail-notes">
+                        <span class="label">工艺备注 / 名称:</span>
+                        <div class="notes-content" id="detail-note">-</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

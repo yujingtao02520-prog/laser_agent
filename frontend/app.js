@@ -224,6 +224,16 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     // Form submit
     addRecipeForm.addEventListener("submit", handleAddRecipeSubmit);
+
+    // Detail modal close
+    document.getElementById("close-detail-modal").addEventListener("click", () => {
+        document.getElementById("detail-modal").style.display = "none";
+    });
+    document.getElementById("detail-modal").addEventListener("click", (e) => {
+        if (e.target === document.getElementById("detail-modal")) {
+            document.getElementById("detail-modal").style.display = "none";
+        }
+    });
 });
 
 // Load materials from backend
@@ -1106,10 +1116,43 @@ function renderRecipesTable(recipes) {
             <td>${r.speed}</td>
             <td><span class="gas-badge" style="color: ${r.gas_type === "N2" ? "var(--cyan)" : "var(--amber)"}">${r.gas_type}</span></td>
             <td>${r.focus_position}</td>
+            <td><button class="btn-table-detail" onclick="showRecipeDetail(${r.id})">详情</button></td>
         `;
         recipesTableBody.appendChild(tr);
     });
 }
+
+function showRecipeDetail(id) {
+    const recipe = state.recipes.find(r => r.id === id);
+    if (!recipe) return;
+    
+    // Helper to format piercing method
+    const getPiercingMethodName = (method) => {
+        if (method === "pulse") return "脉冲穿孔";
+        if (method === "stage") return "分步穿孔";
+        if (method === "direct") return "直接穿孔";
+        return method || "直接穿孔";
+    };
+
+    document.getElementById("detail-material").textContent = recipe.material;
+    document.getElementById("detail-thickness").textContent = recipe.thickness.toFixed(1) + " mm";
+    document.getElementById("detail-nozzle").textContent = recipe.nozzle ? recipe.nozzle + " mm" : "未设置";
+    document.getElementById("detail-piercing").textContent = getPiercingMethodName(recipe.piercing_method);
+    
+    document.getElementById("detail-power").textContent = recipe.laser_power.toFixed(0) + " W";
+    document.getElementById("detail-speed").textContent = recipe.speed.toFixed(0) + " mm/min";
+    document.getElementById("detail-gas").textContent = recipe.gas_type;
+    document.getElementById("detail-pressure").textContent = recipe.gas_pressure ? recipe.gas_pressure.toFixed(1) + " bar" : "未设置";
+    document.getElementById("detail-focus").textContent = recipe.focus_position.toFixed(1) + " mm";
+    document.getElementById("detail-compensation").textContent = recipe.kerf_compensation ? recipe.kerf_compensation.toFixed(2) + " mm" : "0.00 mm";
+    
+    document.getElementById("detail-quality").textContent = recipe.quality_score ? recipe.quality_score.toFixed(1) + "%" : "90.0%";
+    document.getElementById("detail-defect").textContent = recipe.defect_type === "none" ? "无明显缺陷" : (recipe.defect_type || "无");
+    document.getElementById("detail-note").textContent = recipe.operator_note || "无备注说明";
+    
+    document.getElementById("detail-modal").style.display = "flex";
+}
+window.showRecipeDetail = showRecipeDetail;
 
 function filterRecipesTable() {
     const q = dbSearchInput.value.toUpperCase();
