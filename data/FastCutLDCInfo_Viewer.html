@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>激光切割缺陷与专家归因库浏览器 (LDC Info Viewer)</title>
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --panel-bg: #131b32;
+            --accent-color: #10b981;
+            --accent-hover: #059669;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: #1e293b;
+            --row-even: #1e293b70;
+            --row-odd: #0f172a80;
+            --table-header: #020617;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 24px;
+            color: var(--accent-color);
+            text-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        /* Tabs menu */
+        .tabs-menu {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        .tab-btn {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            border-color: var(--accent-color);
+        }
+
+        .tab-btn.active {
+            background-color: var(--accent-color);
+            color: #0b0f19;
+            border-color: var(--accent-color);
+            font-weight: bold;
+        }
+
+        /* Search input */
+        .search-container {
+            margin-bottom: 20px;
+        }
+
+        .search-container input {
+            width: 100%;
+            max-width: 400px;
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        .search-container input:focus {
+            border-color: var(--accent-color);
+        }
+
+        /* Table container */
+        .table-container {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow-x: auto;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 13px;
+        }
+
+        th {
+            background-color: var(--table-header);
+            color: var(--accent-color);
+            font-weight: bold;
+            padding: 12px 14px;
+            border-bottom: 2px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:nth-child(even) {
+            background-color: var(--row-even);
+        }
+
+        tr:nth-child(odd) {
+            background-color: var(--row-odd);
+        }
+
+        tr:hover {
+            background-color: rgba(16, 185, 129, 0.08);
+        }
+
+        .badge-defect {
+            background-color: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+        
+        .badge-offset {
+            font-family: monospace;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: 500;
+        }
+
+        .offset-positive {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+        }
+
+        .offset-negative {
+            background-color: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+        }
+
+        .offset-zero {
+            color: var(--text-muted);
+        }
+
+        .text-advice {
+            color: #cbd5e1;
+            white-space: pre-line;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>激光切割缺陷与专家归因库浏览器 (FastCutLDCInfo)</h1>
+                <div class="subtitle" id="table-subtitle">读取自 data/FastCutLDCInfo.db • 包含 Table1 至 Table8 调参专家库</div>
+            </div>
+            <div id="stats-badge" style="background-color: var(--border-color); padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold;">0 个案例</div>
+        </header>
+
+        <!-- Tabs Menu -->
+        <div class="tabs-menu" id="tabs-container"></div>
+
+        <!-- Search Bar -->
+        <div class="search-container">
+            <input type="text" id="search-input" placeholder="在当前表中搜索缺陷现象或原因分析..." oninput="filterData()">
+        </div>
+
+        <!-- Table -->
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>索引</th>
+                        <th>缺陷现象</th>
+                        <th>缺陷级别/说明</th>
+                        <th>专家分析原因</th>
+                        <th>速度调整 (m/min)</th>
+                        <th>高度调整 (mm)</th>
+                        <th>功率调整 (%)</th>
+                        <th>焦点调整 (mm)</th>
+                        <th>气压1 (bar)</th>
+                        <th>气压2 (bar)</th>
+                        <th>占空比 (%)</th>
+                        <th>频率 (Hz)</th>
+                        <th>推荐解决方案</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body">
+                    <!-- Dynamically populated -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const database = {"Table1": {"title": "不锈钢 - 氮气 - 负焦 (Stainless Steel - N2 - Negative Focus)", "columns": ["tableIdx", "mainPhenomenon", "phenomenonLevel", "picPath", "description", "cutVelocity", "cutHeight", "laserPowerPercentage", "focusPostion", "gasPressure", "gasPressure2", "dutyCycle", "pulseFrequency", "para1", "para2", "para3", "para4", "para5", "text1", "text2", "text3", "text4", "text5"], "rows": [{"tableIdx": 1, "mainPhenomenon": "切不透", "phenomenonLevel": "严重、板面返渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-切不透-严重、板面返渣.JPG", "description": "1、焦点较低\n2、速度较快", "cutVelocity": -10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 2, "mainPhenomenon": "切不透", "phenomenonLevel": "不落料、底部有粘连", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-切不透-不落料、底部有粘连.JPG", "description": "1、焦点较大\n2、速度较快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、增大速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 3, "mainPhenomenon": "挂渣", "phenomenonLevel": "板材底部轻微挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-挂渣-板材底部轻微挂渣.JPG", "description": "1、焦点较低\n2、气压小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大焦点后改善不明显需要加大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 4, "mainPhenomenon": "挂渣、断面分层", "phenomenonLevel": "下半断面分层、挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-挂渣、断面分层-下半断面分层、挂渣.JPG", "description": "1、焦点过低\n2、气压小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.5, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大焦点后改善不明显需要加大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 5, "mainPhenomenon": "切割断面分层", "phenomenonLevel": "断面分层、发黑", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-切割断面分层-断面分层、发黑.JPG", "description": "1、焦点较大\n2、速度快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、减小焦点后改善不明显需要减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 6, "mainPhenomenon": "切割断面粗糙", "phenomenonLevel": "断面上表面非常粗糙", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-切割断面粗糙-断面上表面非常粗糙.JPG", "description": "1、焦点过大\n2、速度快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.5, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、减小焦点后改善不明显需要减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 7, "mainPhenomenon": "断面粗糙、挂渣", "phenomenonLevel": "断面比较粗糙、挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-断面粗糙、挂渣-断面比较粗糙、挂渣.JPG", "description": "1、气压过低\n2、焦点大", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大气压\n2、增大气压后改善不明显需要减小焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 8, "mainPhenomenon": "四面不一致", "phenomenonLevel": "多面有分层、断面发黑", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-四面不一致-多面有分层、断面发黑.JPG", "description": "1、喷嘴同轴度问题\n2、保护镜片有脏污\n3、焦点大", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、重新效准喷嘴同轴度\n2、检查保护镜片脏污\n3、减小焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 9, "mainPhenomenon": "挂渣、有黑点", "phenomenonLevel": "底部有黑点、少量挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-挂渣、有黑点-底部有黑点、少量挂渣.JPG", "description": "1、焦点较小\n2、气压小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大焦点无明显改善需要增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 10, "mainPhenomenon": "分层", "phenomenonLevel": "分层明显", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-氮气-负焦-分层-分层明显.JPG", "description": "1、焦点过大\n2、速度快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、减小焦点无明显改善需要减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}]}, "Table2": {"title": "铝板 - 氮气 - 负焦 (Aluminum - N2 - Negative Focus)", "columns": ["tableIdx", "mainPhenomenon", "phenomenonLevel", "picPath", "description", "cutVelocity", "cutHeight", "laserPowerPercentage", "focusPostion", "gasPressure", "gasPressure2", "dutyCycle", "pulseFrequency", "para1", "para2", "para3", "para4", "para5", "text1", "text2", "text3", "text4", "text5"], "rows": [{"tableIdx": 1, "mainPhenomenon": "挂渣、断面粗糙", "phenomenonLevel": "挂渣较多、断面粗糙", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-空气-负焦-挂渣、断面粗糙-挂渣较多、断面粗糙.JPG", "description": "1、气压过小\n2、速度小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大气压\n2、增大气压无明显改善需要增大速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 2, "mainPhenomenon": "挂渣", "phenomenonLevel": "断面偏黑、底部挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-空气-负焦-挂渣-断面偏黑、底部挂渣.JPG", "description": "1、焦点偏小\n2、气压小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大气压无明显改善需要增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 3, "mainPhenomenon": "断面有凹痕", "phenomenonLevel": "断面有凹痕、颜色偏黑", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-空气-负焦-断面有凹痕-断面有凹痕、颜色偏黑.JPG", "description": "1、气压过大、氧化反应过剩\n2、焦点较大", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": -2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小气压\n2、减小焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 4, "mainPhenomenon": "切不透", "phenomenonLevel": "切不透、反渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-空气-负焦-切不透-切不透、反渣.JPG", "description": "1、速度过快\n2、焦点过大", "cutVelocity": -10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小速度\n2、减小焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 5, "mainPhenomenon": "挂渣", "phenomenonLevel": "挂渣严重、底部偏黑", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/不锈钢-空气-负焦-挂渣-挂渣严重、底部偏黑.JPG", "description": "1、速度较慢\n2、气压小", "cutVelocity": 10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大速度\n2、增大速度无明显改善需要增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}]}, "Table3": {"title": "不锈钢 - 氮气 - 负焦2 (Stainless Steel - N2 - Negative Focus 2)", "columns": ["tableIdx", "mainPhenomenon", "phenomenonLevel", "picPath", "description", "cutVelocity", "cutHeight", "laserPowerPercentage", "focusPostion", "gasPressure", "gasPressure2", "dutyCycle", "pulseFrequency", "para1", "para2", "para3", "para4", "para5", "text1", "text2", "text3", "text4", "text5"], "rows": [{"tableIdx": 1, "mainPhenomenon": "挂渣", "phenomenonLevel": "背面挂渣较多", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-空气-负焦-挂渣-背面挂渣较多.JPG", "description": "1、焦点过大\n2、气压小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、调低焦点无明显改善需要增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 2, "mainPhenomenon": "切不透", "phenomenonLevel": "切不透反渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-空气-负焦-切不透-切不透反渣.JPG", "description": "1、焦点过小\n2、气压过大\n3、焦点过大\n4、速度过快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、减小气压\n3、减小焦点\n4、减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 3, "mainPhenomenon": "挂渣", "phenomenonLevel": "挂硬渣很难去除", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-空气-负焦-挂渣-挂硬渣很难去除.JPG", "description": "1、速度慢\n2、气压小", "cutVelocity": 10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大速度\n2、增大速度无明显改善需要增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 4, "mainPhenomenon": "挂渣", "phenomenonLevel": "挂渣稍多", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-空气-负焦-挂渣-挂渣稍多.JPG", "description": "1、气压较小\n2、速度慢", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大气压\n2、增大气压无明显改善需要增大速度", "text2": "", "text3": "", "text4": "", "text5": ""}]}, "Table4": {"title": "铝板 - 氮气 - 负焦2 (Aluminum - N2 - Negative Focus 2)", "columns": ["tableIdx", "mainPhenomenon", "phenomenonLevel", "picPath", "description", "cutVelocity", "cutHeight", "laserPowerPercentage", "focusPostion", "gasPressure", "gasPressure2", "dutyCycle", "pulseFrequency", "para1", "para2", "para3", "para4", "para5", "text1", "text2", "text3", "text4", "text5"], "rows": [{"tableIdx": 1, "mainPhenomenon": "断面分层、粗糙", "phenomenonLevel": "断面分层、比较粗糙", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/铝板-空气-负焦-标准-效果较好.JPG", "description": "1、焦点过小\n2、气压较低", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.5, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 2, "mainPhenomenon": "粗糙", "phenomenonLevel": "断面非常粗糙", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/铝板-空气-负焦-断面分层、粗糙-断面分层，比较粗糙.JPG", "description": "1、焦点过大\n2、速度快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、减小焦点无明显改善需要减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 3, "mainPhenomenon": "断面分层、轻微挂渣", "phenomenonLevel": "断面分层、转角挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/铝板-空气-负焦-粗糙-断面非常粗糙.JPG", "description": "1、气压偏低\n2、焦点小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大气压\n2、增大气压无明显改善需要增大焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 4, "mainPhenomenon": "切割不稳定", "phenomenonLevel": "断面纹路很斜", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/铝板-空气-负焦-断面分层、轻微挂渣-断面分层、转角挂渣.JPG", "description": "1、速度过快\n2、气压过大", "cutVelocity": -10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小速度\n2、减小气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 5, "mainPhenomenon": "挂渣", "phenomenonLevel": "轻微挂渣、底部纹路", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/铝板-空气-负焦-切割不稳定-断面纹路很斜.JPG", "description": "1、焦点较小\n2、气压较低", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 6, "mainPhenomenon": "纹路不垂直", "phenomenonLevel": "纹路呈圆弧状不垂直", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/铝板-空气-负焦-挂渣-轻微挂渣、底部纹路.JPG", "description": "1、速度过慢", "cutVelocity": 20.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大速度", "text2": "", "text3": "", "text4": "", "text5": ""}]}, "Table5": {"title": "黄铜 - 氮气 - 负焦 (Brass - N2 - Negative Focus)", "columns": ["tableIdx", "mainPhenomenon", "phenomenonLevel", "picPath", "description", "cutVelocity", "cutHeight", "laserPowerPercentage", "focusPostion", "gasPressure", "gasPressure2", "dutyCycle", "pulseFrequency", "para1", "para2", "para3", "para4", "para5", "text1", "text2", "text3", "text4", "text5"], "rows": [{"tableIdx": 1, "mainPhenomenon": "粗糙", "phenomenonLevel": "断面相对粗糙", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氮气-负焦-粗糙-断面相对粗糙.JPG", "description": "1、气压过大\n2、速度较快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": -2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小气压\n2、减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 2, "mainPhenomenon": "粗糙、分层", "phenomenonLevel": "断面比较粗糙、有分层", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氮气-负焦-粗糙、分层-断面比较粗糙、有分层.JPG", "description": "1、气压过小\n2、焦点较小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大气压\n2、增大焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 3, "mainPhenomenon": "粗糙", "phenomenonLevel": "断面非常粗糙", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氮气-负焦-粗糙-断面非常粗糙.JPG", "description": "1、焦点过大\n2、速度较快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -2.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}]}, "Table6": {"title": "黄铜 - 氮气 - 负焦2 (Brass - N2 - Negative Focus 2)", "columns": ["tableIdx", "mainPhenomenon", "phenomenonLevel", "picPath", "description", "cutVelocity", "cutHeight", "laserPowerPercentage", "focusPostion", "gasPressure", "gasPressure2", "dutyCycle", "pulseFrequency", "para1", "para2", "para3", "para4", "para5", "text1", "text2", "text3", "text4", "text5"], "rows": [{"tableIdx": 1, "mainPhenomenon": "粗糙", "phenomenonLevel": "断面相对粗糙有凹痕", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氧气-负焦-粗糙-断面相对粗糙有凹痕.JPG", "description": "1、气压过大\n2、速度较慢", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": -2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小气压\n2、增大速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 2, "mainPhenomenon": "分层、粗糙", "phenomenonLevel": "断面比较粗糙、有分层", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氧气-负焦-分层、粗糙-断面比较粗糙、有分层.JPG", "description": "1、气压过小\n2、焦点较小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小气压\n2、增大焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 3, "mainPhenomenon": "粗糙", "phenomenonLevel": "断面非常粗糙、发黑", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氧气-负焦-粗糙-断面非常粗糙、发黑.JPG", "description": "1、焦点过大\n2、速度较快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -2.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 4, "mainPhenomenon": "粗糙", "phenomenonLevel": "断面相对粗糙", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氧气-负焦-粗糙-断面相对粗糙.JPG", "description": "1、速度较快\n2、焦点较大", "cutVelocity": -10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小速度\n2、减小焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 5, "mainPhenomenon": "粗糙、分层", "phenomenonLevel": "断面相对粗糙、有分层", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氧气-负焦-粗糙、分层-断面相对粗糙、有分层.JPG", "description": "1、焦点偏小\n2、气压偏低", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 6, "mainPhenomenon": "挂渣", "phenomenonLevel": "挂渣较多、断面偏黑", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/紫铜-氧气-负焦-挂渣-挂渣较多、断面偏黑.JPG", "description": "1、速度较慢\n2、气压较小", "cutVelocity": 10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大速度\n2、增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}]}, "Table7": {"title": "黄铜 - 氮气 - 负焦3 (Brass - N2 - Negative Focus 3)", "columns": ["tableIdx", "mainPhenomenon", "phenomenonLevel", "picPath", "description", "cutVelocity", "cutHeight", "laserPowerPercentage", "focusPostion", "gasPressure", "gasPressure2", "dutyCycle", "pulseFrequency", "para1", "para2", "para3", "para4", "para5", "text1", "text2", "text3", "text4", "text5"], "rows": [{"tableIdx": 1, "mainPhenomenon": "黑边", "phenomenonLevel": "断面黑边、底部毛刺", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/黄铜-氮气-负焦-黑边-断面黑边、底部毛刺.JPG", "description": "1、焦点较小\n2、气压较低", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 2, "mainPhenomenon": "分层", "phenomenonLevel": "断面分层、纹路很斜", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/黄铜-氮气-负焦-分层-断面分层、纹路很斜.JPG", "description": "1、速度较快\n2、焦点较大", "cutVelocity": -10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小速度\n2、减小焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 3, "mainPhenomenon": "黑边、挂渣", "phenomenonLevel": "断面黑边、纹路垂直", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/黄铜-氮气-负焦-黑边、挂渣-断面黑边、纹路垂直.JPG", "description": "1、气压较小\n2、速度较慢", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大气压\n2、增大速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 4, "mainPhenomenon": "黑边", "phenomenonLevel": "断面黑边、底纹路拖尾", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/黄铜-氮气-负焦-黑边-断面黑边、底纹路拖尾.JPG", "description": "1、速度较慢\n2、气压较小\n3、焦点较小", "cutVelocity": 10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小速度\n2、增大气压\n3、增大焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 5, "mainPhenomenon": "粗糙", "phenomenonLevel": "断面粗糙、有炸点", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/黄铜-氮气-负焦-粗糙-断面粗糙、有炸点.JPG", "description": "1、气压较大\n2、气体不纯", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": -2.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小气压\n2、检查气路气体", "text2": "", "text3": "", "text4": "", "text5": ""}]}, "Table8": {"title": "碳钢 - 氧气 - 正焦 (Carbon Steel - O2 - Positive Focus)", "columns": ["tableIdx", "mainPhenomenon", "phenomenonLevel", "picPath", "description", "cutVelocity", "cutHeight", "laserPowerPercentage", "focusPostion", "gasPressure", "gasPressure2", "dutyCycle", "pulseFrequency", "para1", "para2", "para3", "para4", "para5", "text1", "text2", "text3", "text4", "text5"], "rows": [{"tableIdx": 1, "mainPhenomenon": "切不透", "phenomenonLevel": "表面返渣、冒铁水", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-切不透-表面返渣、冒铁水.JPG", "description": "1、气压太小\n2、速度过快\n3、焦点较低\n4、功率较低", "cutVelocity": -10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.5, "gasPressure": 0.1, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大气压\n2、减小速度\n3、增大焦点\n4、增大功率", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 2, "mainPhenomenon": "切不透", "phenomenonLevel": "表面切透，底部挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-切不透-表面切透、底部挂渣.JPG", "description": "1、气压过大\n2、功率过高\n3、焦点过大", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": -5.0, "focusPostion": 0.0, "gasPressure": -0.2, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小气压\n2、减小功率\n3、减小焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 3, "mainPhenomenon": "底部挂渣", "phenomenonLevel": "断面正常，底部挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-底部挂渣-断面正常、底部挂渣.JPG", "description": "1、气压过小\n2、速度过低", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.1, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大气压\n2、增大速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 4, "mainPhenomenon": "底部挂渣", "phenomenonLevel": "上表面粗糙，底部挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-底部挂渣-上表面粗糙、底部挂渣.JPG", "description": "1、焦点过低\n2、气压较小", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、增大气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 5, "mainPhenomenon": "下表面挂渣", "phenomenonLevel": "断面下表面挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-下表面挂渣-断面下表面挂渣.JPG", "description": "1、焦点过高\n2、速度较快", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -0.5, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、减小速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 6, "mainPhenomenon": "下表面凸起熔边", "phenomenonLevel": "底部凸起挂熔边", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-下表面凸起熔边-底部凸起挂熔边.JPG", "description": "1、焦点较大\n2、气压较大\n3、切割高度偏高", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -0.5, "gasPressure": -0.1, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小焦点\n2、减小气压\n3、减小切割高度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 7, "mainPhenomenon": "断面非常粗糙", "phenomenonLevel": "断面粗糙，纹路过烧", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-断面非常粗糙-断面粗糙、纹路过烧.JPG", "description": "1、焦点过低\n2、气压较大\n3、速度较慢", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 1.5, "gasPressure": -0.1, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大焦点\n2、减小气压\n3、增大速度", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 8, "mainPhenomenon": "断面粗糙", "phenomenonLevel": "断面粗糙，粗纹明显", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-断面粗糙-断面粗糙、粗纹明显.JPG", "description": "1、气压过大\n2、焦点过低", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.5, "gasPressure": -0.1, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小气压\n2、增大焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 9, "mainPhenomenon": "断面轻微粗糙", "phenomenonLevel": "上表面轻微粗纹", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-断面轻微粗糙-上表面轻微粗纹.JPG", "description": "1、速度过慢\n2、气压过高", "cutVelocity": 10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.0, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、增大速度\n2、减小气压", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 10, "mainPhenomenon": "断面四面不一致", "phenomenonLevel": "四面纹路不均匀", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-断面四面不一致-四面纹路不均匀.JPG", "description": "1、喷嘴同轴度较差\n2、保护镜片有脏污\n3、焦点过低", "cutVelocity": 0.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": 0.5, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、调节喷嘴同轴度\n2、检查保护镜片\n3、增大焦点", "text2": "", "text3": "", "text4": "", "text5": ""}, {"tableIdx": 11, "mainPhenomenon": "拐角挂渣", "phenomenonLevel": "断面斜纹，拐角挂渣", "picPath": "C:/Maxphotonics/LaserCut/FastCutPic/碳钢-氧气-正焦-拐角挂渣-断面斜纹、拐角挂渣.JPG", "description": "1、速度过快\n2、焦点过高", "cutVelocity": -10.0, "cutHeight": 0.0, "laserPowerPercentage": 0.0, "focusPostion": -0.5, "gasPressure": 0.0, "gasPressure2": 0.0, "dutyCycle": 0.0, "pulseFrequency": 0.0, "para1": 0.0, "para2": 0.0, "para3": 0.0, "para4": 0.0, "para5": 0.0, "text1": "1、减小速度\n2、减小焦点", "text2": "", "text3": "", "text4": "", "text5": ""}]}};
+        let currentTable = "Table1";
+
+        function initTabs() {
+            const container = document.getElementById('tabs-container');
+            container.innerHTML = '';
+            
+            Object.keys(database).forEach(tableName => {
+                const btn = document.createElement('button');
+                btn.className = `tab-btn ${tableName === currentTable ? 'active' : ''}`;
+                btn.id = `btn-${tableName}`;
+                btn.textContent = `${tableName}: ${database[tableName].title.split(' ')[0]}`;
+                btn.onclick = () => selectTab(tableName);
+                container.appendChild(btn);
+            });
+            
+            updateTable();
+        }
+
+        function selectTab(tableName) {
+            document.querySelector(`.tab-btn.active`).classList.remove('active');
+            document.getElementById(`btn-${tableName}`).classList.add('active');
+            currentTable = tableName;
+            document.getElementById('search-input').value = '';
+            updateTable();
+        }
+
+        function formatOffset(val) {
+            if (val === 0 || val === 0.0) return `<span class="badge-offset offset-zero">0</span>`;
+            const cls = val > 0 ? 'offset-positive' : 'offset-negative';
+            const sign = val > 0 ? '+' : '';
+            return `<span class="badge-offset ${cls}">${sign}${val}</span>`;
+        }
+
+        function updateTable() {
+            const tableData = database[currentTable];
+            document.getElementById('table-subtitle').textContent = `当前表: ${currentTable} — ${tableData.title}`;
+            filterData();
+        }
+
+        function filterData() {
+            const searchQuery = document.getElementById('search-input').value.toLowerCase();
+            const tableData = database[currentTable];
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '';
+
+            const filteredRows = tableData.rows.filter(row => {
+                const matchesPhenomenon = (row.mainPhenomenon || '').toLowerCase().includes(searchQuery);
+                const matchesLevel = (row.phenomenonLevel || '').toLowerCase().includes(searchQuery);
+                const matchesDesc = (row.description || '').toLowerCase().includes(searchQuery);
+                const matchesText1 = (row.text1 || '').toLowerCase().includes(searchQuery);
+                return matchesPhenomenon || matchesLevel || matchesDesc || matchesText1;
+            });
+
+            filteredRows.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${row.tableIdx}</td>
+                    <td><span class="badge-defect">${row.mainPhenomenon || '未知'}</span></td>
+                    <td style="font-weight: 500; color: #f1f5f9;">${row.phenomenonLevel || ''}</td>
+                    <td style="color: #fca5a5;">${row.description || ''}</td>
+                    <td>${formatOffset(row.cutVelocity)}</td>
+                    <td>${formatOffset(row.cutHeight)}</td>
+                    <td>${formatOffset(row.laserPowerPercentage)}</td>
+                    <td>${formatOffset(row.focusPostion)}</td>
+                    <td>${formatOffset(row.gasPressure)}</td>
+                    <td>${formatOffset(row.gasPressure2)}</td>
+                    <td>${formatOffset(row.dutyCycle)}</td>
+                    <td>${formatOffset(row.pulseFrequency)}</td>
+                    <td class="text-advice">${row.text1 || ''}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('stats-badge').textContent = `共 ${filteredRows.length} 个案例`;
+        }
+
+        // Initialize
+        initTabs();
+    </script>
+</body>
+</html>
