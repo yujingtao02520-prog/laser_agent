@@ -1023,7 +1023,13 @@ class LaserCuttingCopilotApp(ctk.CTk):
         
         recipes = db.get_all_recipes()
         if filter_query:
-            recipes = [r for r in recipes if filter_query.upper() in r["material"].upper()]
+            q = filter_query.upper()
+            recipes = [
+                r for r in recipes 
+                if q in r["material"].upper() 
+                or q in r.get("gas_type", "").upper() 
+                or q in r.get("nozzle", "").upper()
+            ]
             
         h_mat = pad_visual("材质", 14)
         h_thick = pad_visual("厚度", 10)
