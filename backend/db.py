@@ -255,15 +255,32 @@ def load_db() -> List[Dict[str, Any]]:
         except Exception as e:
             print(f"Error loading TechData.db SQLite: {e}")
 
-    # 2. Append DEFAULT_RECIPES for test compatibility
+    # 2. Load custom user-added recipes from expert_db.json
+    custom_recipes = []
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                custom_recipes = json.load(f)
+        except Exception as e:
+            print(f"Error loading custom recipes from expert_db.json: {e}")
+            
     existing_ids = {r["id"] for r in recipes}
-    for r in DEFAULT_RECIPES:
+    for r in custom_recipes:
         if r["id"] not in existing_ids:
             recipes.append(r)
+
+    # 3. Append DEFAULT_RECIPES for test compatibility (only when TESTING is active)
+    if os.environ.get("TESTING") == "true":
+        existing_ids = {r["id"] for r in recipes}
+        for r in DEFAULT_RECIPES:
+            if r["id"] not in existing_ids:
+                recipes.append(r)
             
     return recipes
 
 def save_db(recipes: List[Dict[str, Any]]):
+    # To keep save_db compatible, write the recipes directly to DB_FILE.
+    # Note: custom added recipes are normally managed directly via add_recipe/delete_recipe.
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(recipes, f, indent=4, ensure_ascii=False)
 
@@ -310,20 +327,46 @@ def find_nearest_recipe(material: str, thickness: float) -> Optional[Dict[str, A
     return mat_recipes[0]
 
 def add_recipe(recipe: Dict[str, Any]) -> Dict[str, Any]:
-    recipes = load_db()
-    new_id = max([r["id"] for r in recipes]) + 1 if recipes else 1
+    # 1. Load existing custom recipes from expert_db.json
+    custom_recipes = []
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                custom_recipes = json.load(f)
+        except Exception:
+            pass
+            
+    # Calculate a unique ID that does not conflict with existing database or custom IDs
+    all_recipes = load_db()
+    new_id = max([r["id"] for r in all_recipes]) + 1 if all_recipes else 20000
     recipe["id"] = new_id
-    recipes.append(recipe)
-    save_db(recipes)
+    
+    custom_recipes.append(recipe)
+    
+    # Save only custom recipes to expert_db.json
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(custom_recipes, f, indent=4, ensure_ascii=False)
+        
     return recipe
 
 def delete_recipe(recipe_id: int) -> bool:
-    recipes = load_db()
-    initial_len = len(recipes)
-    recipes = [r for r in recipes if r["id"] != recipe_id]
-    if len(recipes) < initial_len:
-        save_db(recipes)
+    # Load existing custom recipes from expert_db.json
+    custom_recipes = []
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                custom_recipes = json.load(f)
+        except Exception:
+            pass
+            
+    initial_len = len(custom_recipes)
+    custom_recipes = [r for r in custom_recipes if r["id"] != recipe_id]
+    
+    if len(custom_recipes) < initial_len:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(custom_recipes, f, indent=4, ensure_ascii=False)
         return True
+        
     return False
 
 HISTORY_FILE = os.path.join(os.path.dirname(__file__), "cut_history.json")

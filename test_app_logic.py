@@ -1,6 +1,8 @@
 import sys
 import os
 
+os.environ["TESTING"] = "true"
+
 # Ensure root is on PATH
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
