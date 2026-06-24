@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>激光切割工艺 Copilot - 智能决策系统</title>
+    <!-- Google Fonts: Outfit (UI), JetBrains Mono (Codes/Metrics) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/frontend/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- TOP DECORATION GLOWS -->
+        <div class="glow glow-1"></div>
+        <div class="glow glow-2"></div>
+
+        <!-- HEADER SECTION -->
+        <header class="app-header">
+            <div class="logo-area">
+                <span class="logo-icon">⚡</span>
+                <div class="logo-text">
+                    <h1>LASER CUTTING COPILOT</h1>
+                    <span class="logo-sub">激光切割智能工艺决策系统</span>
+                </div>
+            </div>
+            <div class="status-bar">
+                <div class="status-indicator active" id="indicator-laser">
+                    <span class="dot"></span> 激光源: 准备就绪
+                </div>
+                <div class="status-indicator active" id="indicator-gas">
+                    <span class="dot"></span> 辅助气体: 正常
+                </div>
+                <div class="status-indicator active" id="indicator-head">
+                    <span class="dot"></span> 随动高度计: 已校准
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <div class="main-grid">
+            
+            <!-- LEFT CONTROL COLUMN -->
+            <section class="control-panel glass-card">
+                <h2 class="section-title">⚙️ 任务设置</h2>
+                
+                <div class="form-group">
+                    <label for="material-select">板材材质</label>
+                    <select id="material-select" class="styled-select">
+                        <option value="SUS304" selected>SUS304 不锈钢</option>
+                        <option value="Q235">Q235 碳素钢</option>
+                        <option value="Aluminum">铝合金</option>
+                        <option value="Copper">紫铜</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="thickness-select">板材厚度 (mm)</label>
+                    <select id="thickness-select" class="styled-select">
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="drawing-select">切割图纸 (DXF)</label>
+                    <select id="drawing-select" class="styled-select">
+                        <option value="flange">法兰盘 (flange.dxf) - 中等复杂度</option>
+                        <option value="gear">工业齿轮 (gear.dxf) - 高密小孔</option>
+                        <option value="bracket">安装支架 (bracket.dxf) - 尖角拐角</option>
+                    </select>
+                </div>
+
+                <div class="control-divider"></div>
+
+                <div class="machine-specs">
+                    <h3>🖥️ 设备硬件约束</h3>
+                    <div class="spec-row">
+                        <span>最大激光功率:</span>
+                        <span class="value">6000 W</span>
+                    </div>
+                    <div class="spec-row">
+                        <span>最大吹气压力:</span>
+                        <span class="value">20 bar</span>
+                    </div>
+                </div>
+
+                <div class="control-divider"></div>
+
+                <div class="button-group">
+                    <button id="btn-precheck" class="btn btn-secondary">🔍 第一步：板材切前检测</button>
+                    <button id="btn-recommend" class="btn btn-primary" disabled>🤖 第二步：生成工艺推荐</button>
+                </div>
+            </section>
+
+            <!-- MIDDLE WORK AREA -->
+            <div class="work-area">
+                
+                <!-- TOP DUAL PANELS (PRE-CHECK & PARAMETERS) -->
+                <div class="dual-row">
+                    
+                    <!-- PRE-CUT INSPECTION CARD -->
+                    <section class="glass-card panel-precheck">
+                        <h2 class="panel-title">1️⃣ 视觉感知：切前检测 (2D/3D)</h2>
+                        <div class="precheck-content">
+                            <div class="visual-precheck-box">
+                                <div class="canvas-wrapper">
+                                    <span class="canvas-label">2D 表面成像 & 3D 轮廓扫描</span>
+                                    <canvas id="precut-canvas" width="220" height="150"></canvas>
+                                </div>
+                                <div class="flatness-graph">
+                                    <span class="canvas-label">3D 表面翘曲高度 (mm)</span>
+                                    <div class="warp-chart-container">
+                                        <svg id="warp-svg" viewBox="0 0 200 60"></svg>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="inspection-results">
+                                <div id="precheck-status" class="status-badge info">等待检测...</div>
+                                <div id="precheck-warnings" class="warning-list">
+                                    <!-- Populated by JS -->
+                                    <p class="placeholder-text">请先点击“第一步：板材切前检测”按钮分析板材表面。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- SMART RECOMMENDATION CARD -->
+                    <section class="glass-card panel-recommendation">
+                        <h2 class="panel-title">2️⃣ 工艺决策：大模型及规则推荐</h2>
+                        <div class="recommend-content">
+                            <div class="confidence-badge-area">
+                                <div class="circular-progress" id="conf-progress">
+                                    <div class="inner-circle">
+                                        <span id="conf-val">--</span>
+                                        <span class="pct">%</span>
+                                    </div>
+                                    <span class="progress-label">推荐置信度</span>
+                                </div>
+                            </div>
+                            
+                            <div class="reasoning-box">
+                                <h3>🧠 智能决策推导链：</h3>
+                                <div class="log-console" id="recommendation-logs">
+                                    <p class="placeholder-text">// 等待任务触发，智能体将在此输出工艺参数检索、厚度物理缩放与规则校验推理日志...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    
+                </div>
+
+                <!-- BOTTOM DUAL PANELS (PARAMETER TWEAK & POST-CUT) -->
+                <div class="dual-row">
+                    
+                    <!-- ACTUAL & RECOMMENDED PARAMETERS CARD -->
+                    <section class="glass-card panel-parameters">
+                        <h2 class="panel-title">🛠️ 工艺运行参数设置</h2>
+                        <p class="sub-instructions">以下参数由 Agent 推荐并加载，您可以手动微调它们，然后点击“启动切割”：</p>
+                        
+                        <div class="params-grid">
+                            <div class="param-slider-group">
+                                <div class="slider-header">
+                                    <span class="label">🔥 激光功率 (W)</span>
+                                    <input type="text" id="val-power" class="param-val-input" value="--" disabled>
+                                </div>
+                                <input type="range" id="input-power" min="500" max="6000" step="50" disabled>
+                                <span class="range-limits">500W - 6000W</span>
+                            </div>
+
+                            <div class="param-slider-group">
+                                <div class="slider-header">
+                                    <span class="label">🚀 切割速度 (mm/min)</span>
+                                    <input type="text" id="val-speed" class="param-val-input" value="--" disabled>
+                                </div>
+                                <input type="range" id="input-speed" min="100" max="25000" step="50" disabled>
+                                <span class="range-limits">100 - 25000</span>
+                            </div>
+
+                            <div class="param-slider-group">
+                                <div class="slider-header">
+                                    <span class="label">💨 辅助气体 & 压力 (bar)</span>
+                                    <input type="text" id="val-pressure" class="param-val-input" value="--" disabled>
+                                </div>
+                                <div class="gas-combo">
+                                    <select id="input-gas-type" class="styled-select minified" disabled>
+                                        <option value="N2">N2 (氮气)</option>
+                                        <option value="O2">O2 (氧气)</option>
+                                        <option value="Air">Air (空气)</option>
+                                    </select>
+                                    <input type="range" id="input-pressure" min="0.1" max="20.0" step="0.1" disabled>
+                                </div>
+                                <span class="range-limits">0.1 - 20.0 bar</span>
+                            </div>
+
+                            <div class="param-slider-group">
+                                <div class="slider-header">
+                                    <span class="label">🎯 焦点位置 (mm)</span>
+                                    <input type="text" id="val-focus" class="param-val-input" value="--" disabled>
+                                </div>
+                                <input type="range" id="input-focus" min="-8.0" max="8.0" step="0.1" disabled>
+                                <span class="range-limits">-8.0mm (板内) 至 +8.0mm (板外)</span>
+                            </div>
+
+                            <div class="param-slider-group">
+                                <div class="slider-header">
+                                    <span class="label">⭕ 喷嘴型号 / 割缝补偿 (mm)</span>
+                                    <span class="value" id="val-nozzle">--</span>
+                                </div>
+                                <div class="nozzle-layout">
+                                    <input type="text" id="input-nozzle" class="styled-input inline-box" value="--" disabled>
+                                    <input type="number" id="input-compensation" class="styled-input inline-box" step="0.01" value="0.00" disabled>
+                                </div>
+                                <span class="range-limits">喷嘴直径 / 半径补偿</span>
+                            </div>
+
+                            <div class="param-slider-group">
+                                <div class="slider-header">
+                                    <span class="label">📍 穿孔方式</span>
+                                    <span class="value" id="val-piercing">--</span>
+                                </div>
+                                <select id="input-piercing" class="styled-select full-width" disabled>
+                                    <option value="direct">直穿孔 (Direct)</option>
+                                    <option value="pulse">脉冲穿孔 (Pulse)</option>
+                                    <option value="stage">分阶段渐进穿孔 (Stage)</option>
+                                </select>
+                                <span class="range-limits">根据板厚自动建议的穿孔策略</span>
+                            </div>
+                        </div>
+
+                        <div class="action-row">
+                            <button id="btn-cut" class="btn btn-primary btn-large btn-glow" disabled>🔥 启动模拟试切</button>
+                        </div>
+                    </section>
+
+                    <!-- POST-CUT QUALITY INSPECTION CARD -->
+                    <section class="glass-card panel-postcheck">
+                        <h2 class="panel-title">3️⃣ 视觉反馈：切后缺陷与质量评分</h2>
+                        <div class="postcheck-content">
+                            
+                            <!-- Score Gauge -->
+                            <div class="score-card">
+                                <div class="gauge-wrapper">
+                                    <svg class="gauge-svg" viewBox="0 0 100 60">
+                                        <path class="gauge-bg" d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#222f46" stroke-width="8" stroke-linecap="round"/>
+                                        <path id="gauge-fill" class="gauge-fill" d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="url(#gaugeGlow)" stroke-width="8" stroke-linecap="round" stroke-dasharray="126" stroke-dashoffset="126"/>
+                                        <defs>
+                                            <linearGradient id="gaugeGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+                                                <stop offset="0%" stop-color="#f43f5e" />
+                                                <stop offset="55%" stop-color="#f59e0b" />
+                                                <stop offset="100%" stop-color="#10b981" />
+                                            </linearGradient>
+                                        </defs>
+                                    </svg>
+                                    <div class="gauge-value" id="score-text">--</div>
+                                </div>
+                                <span class="gauge-title">综合质量评分</span>
+                            </div>
+
+                            <div class="quality-details-grid">
+                                <div class="cut-visualization">
+                                    <span class="canvas-label">切缝质量 2D 轮廓相机</span>
+                                    <canvas id="postcut-canvas" width="230" height="110"></canvas>
+                                </div>
+                                
+                                <div class="visual-features">
+                                    <h3>📏 3D 轮廓仪物理测量指标：</h3>
+                                    <ul class="feature-list">
+                                        <li>挂渣高度 (Dross): <span class="val-lbl" id="lbl-dross">--</span></li>
+                                        <li>熔边状态 (Burn): <span class="val-lbl" id="lbl-burn">--</span></li>
+                                        <li>切缝宽度 (Kerf): <span class="val-lbl" id="lbl-kerf">--</span></li>
+                                        <li>断面粗糙度 (Ra): <span class="val-lbl" id="lbl-rough">--</span></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="inspection-summary" id="quality-summary-box">
+                            <p class="placeholder-text">// 切割完成后，此处将实时展示质量评估报告与缺陷归因诊断。</p>
+                        </div>
+                    </section>
+                </div>
+            </div>
+            
+            <!-- RIGHT SIDEBAR (CLOSED-LOOP TUNING & DATABASE) -->
+            <section class="right-panel">
+                
+                <!-- CLOSED LOOP ADVISORY CARD -->
+                <div class="glass-card panel-closedloop">
+                    <h2 class="panel-title">4️⃣ 闭环调参：缺陷归因与安全调优</h2>
+                    
+                    <div class="closedloop-body">
+                        <div class="advisory-panel">
+                            <h3>💡 智能体调参修正建议</h3>
+                            <div class="progress-bar-container" id="llm-progress-container" style="margin: 5px 0 10px 0; display: none;">
+                                <div class="progress-bar-label" id="llm-progress-label" style="font-size: 11px; color: var(--amber); margin-bottom: 4px;">大模型智能体正在进行推理诊断...</div>
+                                <div class="progress-bar-track" style="height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden; position: relative;">
+                                    <div class="progress-bar-fill" id="llm-progress-fill" style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--rose), var(--amber), var(--emerald)); transition: width 0.3s ease; border-radius: 3px;"></div>
+                                </div>
+                            </div>
+                            <div class="advice-box" id="advice-content">
+                                <p class="placeholder-text">等待首轮试切完成。如果质量评分较低，智能体将在这里对缺陷进行物理归因并提出参数修正案。</p>
+                            </div>
+                        </div>
+
+                        <div class="tuning-graph-card">
+                            <h3>📈 闭环质量优化趋势</h3>
+                            <div class="trend-chart-container">
+                                <svg id="trend-svg" viewBox="0 0 200 70"></svg>
+                            </div>
+                        </div>
+                        
+                        <div class="loop-buttons">
+                            <button id="btn-apply-tune" class="btn btn-success full-width" disabled>🔁 一键应用参数修正 & 重新试切</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DATABASE CRUD CARD -->
+                <div class="glass-card panel-database">
+                    <div class="tab-header">
+                        <button class="tab-btn active" id="tab-db-view">📁 工艺知识库</button>
+                        <button class="tab-btn" id="tab-db-add">➕ 新增工艺</button>
+                    </div>
+                    
+                    <div class="tab-body">
+                        <!-- VIEW RECIPES -->
+                        <div id="db-view-panel" class="tab-content active">
+                            <div class="db-search">
+                                <input type="text" id="db-search-input" placeholder="输入材质搜索..." class="styled-input">
+                            </div>
+                            <div class="db-table-wrapper">
+                                <table class="db-table" id="recipes-table">
+                                    <thead>
+                                        <tr>
+                                            <th>材质</th>
+                                            <th>厚度</th>
+                                            <th>功率</th>
+                                            <th>速度</th>
+                                            <th>气体</th>
+                                            <th>焦点</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Populated by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- ADD RECIPE FORM -->
+                        <div id="db-add-panel" class="tab-content">
+                            <form id="add-recipe-form">
+                                <div class="form-row">
+                                    <div class="form-group half">
+                                        <label>材质</label>
+                                        <input type="text" id="add-material" class="styled-input" required placeholder="如 SUS316">
+                                    </div>
+                                    <div class="form-group half">
+                                        <label>厚度 (mm)</label>
+                                        <input type="number" id="add-thickness" class="styled-input" step="0.1" required placeholder="5.0">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group half">
+                                        <label>功率 (W)</label>
+                                        <input type="number" id="add-power" class="styled-input" step="50" required placeholder="3000">
+                                    </div>
+                                    <div class="form-group half">
+                                        <label>速度 (mm/min)</label>
+                                        <input type="number" id="add-speed" class="styled-input" step="50" required placeholder="5000">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group half">
+                                        <label>气体</label>
+                                        <select id="add-gas" class="styled-select">
+                                            <option value="N2">N2 (氮气)</option>
+                                            <option value="O2">O2 (氧气)</option>
+                                            <option value="Air">Air (空气)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group half">
+                                        <label>气压 (bar)</label>
+                                        <input type="number" id="add-pressure" class="styled-input" step="0.1" required placeholder="14.0">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group half">
+                                        <label>焦点 (mm)</label>
+                                        <input type="number" id="add-focus" class="styled-input" step="0.1" required placeholder="-1.5">
+                                    </div>
+                                    <div class="form-group half">
+                                        <label>喷嘴 / 补偿</label>
+                                        <div class="nozzle-layout mini">
+                                            <input type="text" id="add-nozzle" class="styled-input" placeholder="2.0" required>
+                                            <input type="number" id="add-comp" class="styled-input" step="0.01" placeholder="0.18" required>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary full-width" style="margin-top: 10px;">💾 保存至专家工艺库</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- SCRIPTS -->
+    <script src="/frontend/app.js"></script>
+</body>
+</html>
