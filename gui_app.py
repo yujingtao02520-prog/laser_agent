@@ -104,9 +104,15 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.draw_clean_postcut_canvas()
         self.draw_empty_warp_chart()
         self.draw_empty_trend_chart()
+        self.draw_empty_postcut_3d_chart()
+
+        self.auto_analyze_after_cut = False
 
         # Bind closing event to clear resources
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Load baseline parameters on startup automatically
+        self.auto_load_baseline_recipe()
 
         # Handle window resize and font scaling
         self.original_width = 1600
@@ -295,10 +301,12 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.selected_material = value
         self.update_thickness_options(value)
         self.reset_workflow()
+        self.auto_load_baseline_recipe()
 
     def on_thickness_change(self, value):
         self.selected_thickness = float(value)
         self.reset_workflow()
+        self.auto_load_baseline_recipe()
 
     def reset_workflow(self):
         self.precheck_done = False
@@ -311,16 +319,20 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.btn_recommend.configure(state="disabled")
         self.btn_cut.configure(state="disabled")
         self.btn_apply_tune.configure(state="disabled")
+        if hasattr(self, "btn_analyze"):
+            self.btn_analyze.configure(state="disabled", text="第二步：送入 AI 检测模型分析")
         
         self.draw_clean_precut_canvas()
         self.draw_clean_postcut_canvas()
         self.draw_empty_warp_chart()
         self.draw_empty_trend_chart()
+        if hasattr(self, "canvas_cut_3d"):
+            self.draw_empty_postcut_3d_chart()
         
         self.precheck_badge.configure(text="等待检测...", fg_color="#0d1b3e", text_color="#3b82f6")
         self.precheck_warning_text.configure(state="normal")
         self.precheck_warning_text.delete("1.0", "end")
-        self.precheck_warning_text.insert("end", "请先在侧边栏触发板材切前检测，以评估板面翘曲及表面污染风险。")
+        self.precheck_warning_text.insert("end", "请先在侧边栏触发板面质量检测（可选），以评估板面翘曲及表面污染风险。")
         self.precheck_warning_text.configure(state="disabled")
 
         self.conf_val_lbl.configure(text="--")
@@ -345,13 +357,74 @@ class LaserCuttingCopilotApp(ctk.CTk):
         
         self.postcheck_summary_text.configure(state="normal")
         self.postcheck_summary_text.delete("1.0", "end")
-        self.postcheck_summary_text.insert("end", "// 试切完成后，此处将实时展示质量评估报告与缺陷归因诊断。")
+        self.postcheck_summary_text.insert("end", "// 送入检测模型后，此处将展示评估报告与归因诊断。")
         self.postcheck_summary_text.configure(state="disabled")
 
         self.advice_console.configure(state="normal")
         self.advice_console.delete("1.0", "end")
-        self.advice_console.insert("end", "等待首轮切割报告。若切割指标不佳，智能体将在此进行多维诊断并输出调参偏置建议。")
+        self.advice_console.insert("end", "等待试切与切面分析完成。若切割指标不佳，智能体将在此进行多维诊断并输出调参偏置建议。")
         self.advice_console.configure(state="disabled")
+
+    def draw_empty_postcut_3d_chart(self):
+        self.ax_cut_3d.clear()
+        self.ax_cut_3d.set_facecolor('#02040a')
+        self.fig_cut_3d.patch.set_facecolor('#0b0f19')
+        self.ax_cut_3d.text(0.5, 0.5, '等待试切启动...', horizontalalignment='center', verticalalignment='center', color='#64748b', fontfamily='sans-serif', fontsize=9, transform=self.ax_cut_3d.transAxes)
+        self.ax_cut_3d.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, right=False, labelleft=False)
+        for spine in self.ax_cut_3d.spines.values():
+            spine.set_visible(False)
+        self.canvas_cut_3d.draw()
+
+    def auto_load_baseline_recipe(self):
+        # Find nearest recipe in DB
+        rec = db.find_nearest_recipe(self.selected_material, self.selected_thickness)
+        if not rec:
+            # Fallback to default mock recommendations if not found
+            rec = recommender.recommend_parameters(self.selected_material, self.selected_thickness)
+            
+        # Set values to running params
+        self.running_params = RunningParams()
+        self.running_params.power = rec["laser_power"]
+        self.running_params.speed = rec["speed"]
+        self.running_params.gasType = rec.get("gas_type", "Air")
+        self.running_params.pressure = rec.get("gas_pressure", 0.0)
+        self.running_params.focus = rec["focus_position"]
+        self.running_params.nozzle = rec.get("nozzle", "2.0")
+        self.running_params.compensation = rec.get("kerf_compensation", 0.15)
+        self.running_params.piercing = rec.get("piercing_method", "pulse")
+
+        # Enable sliders and set values
+        self.enable_parameter_sliders()
+        
+        self.grp_p["slider"].set(rec["laser_power"])
+        self.set_entry_value(self.grp_p["entry"], f"{rec['laser_power']:.0f} W")
+        
+        self.grp_s["slider"].set(rec["speed"])
+        self.set_entry_value(self.grp_s["entry"], f"{rec['speed']:.0f} mm/min")
+        
+        self.grp_pr["slider"].set(rec.get("gas_pressure", 0.0))
+        self.set_entry_value(self.grp_pr["entry"], f"{rec.get('gas_pressure', 0.0):.1f} bar")
+        
+        self.grp_f["slider"].set(rec["focus_position"])
+        self.set_entry_value(self.grp_f["entry"], f"{rec['focus_position']:.2f} mm")
+
+        self.gas_menu.configure(state="normal")
+        self.gas_menu.set(rec.get("gas_type", "Air"))
+        
+        self.piercing_menu.configure(state="normal")
+        self.piercing_menu.set(rec.get("piercing_method", "pulse"))
+
+        # Nozzle & Comp text
+        self.nozzle_ent.configure(state="normal")
+        self.nozzle_ent.delete(0, "end")
+        self.nozzle_ent.insert(0, rec.get("nozzle", "2.0"))
+        
+        self.comp_ent.configure(state="normal")
+        self.comp_ent.delete(0, "end")
+        self.comp_ent.insert(0, f"{rec.get('kerf_compensation', 0.15):.3f}")
+
+        # Enable cut button
+        self.btn_cut.configure(state="normal")
 
     # ==========================================
 
@@ -425,9 +498,9 @@ class LaserCuttingCopilotApp(ctk.CTk):
 
         postcheck_body_frame = ctk.CTkFrame(postcheck_panel, fg_color="transparent")
         postcheck_body_frame.pack(fill="both", expand=True, padx=15, pady=(0, 12))
-        postcheck_body_frame.grid_columnconfigure(0, weight=0, minsize=110)
-        postcheck_body_frame.grid_columnconfigure(1, weight=0, minsize=190)
-        postcheck_body_frame.grid_columnconfigure(2, weight=1)
+        postcheck_body_frame.grid_columnconfigure(0, weight=0, minsize=100)
+        postcheck_body_frame.grid_columnconfigure(1, weight=0, minsize=160)
+        postcheck_body_frame.grid_columnconfigure(2, weight=1, minsize=200)
         postcheck_body_frame.grid_columnconfigure(3, weight=1)
         postcheck_body_frame.grid_rowconfigure(0, weight=1)
 
@@ -450,30 +523,40 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.postcut_canvas = tk.Canvas(col1_post, width=170, height=92, bg="#02040a", highlightthickness=1, highlightbackground="#1e293b")
         self.postcut_canvas.pack(fill="x", pady=2)
 
-        # Column 2: 3D Metrology Metrics
-        col2_post = ctk.CTkFrame(postcheck_body_frame, fg_color="#090d16", corner_radius=8)
+        # Column 2: 3D cut wall cross-section profile (Matplotlib)
+        col2_post = ctk.CTkFrame(postcheck_body_frame, fg_color="transparent")
         col2_post.grid(row=0, column=2, padx=(0, 10), sticky="nsew")
-        lbl_m = ctk.CTkLabel(col2_post, text="3D测高物理量测：", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8")
-        lbl_m.pack(anchor="w", padx=10, pady=(5, 2))
-        
-        metrics_grid = ctk.CTkFrame(col2_post, fg_color="transparent")
-        metrics_grid.pack(fill="both", expand=True, padx=5, pady=2)
-        metrics_grid.grid_columnconfigure(0, weight=1)
-        metrics_grid.grid_columnconfigure(1, weight=1)
-        
-        self.dross_lbl = self.add_metric_item(metrics_grid, "挂渣 (Dross):", 0, 0)
-        self.burn_lbl = self.add_metric_item(metrics_grid, "溶边 (Burn):", 0, 1)
-        self.kerf_lbl = self.add_metric_item(metrics_grid, "割缝 (Kerf):", 1, 0)
-        self.rough_lbl = self.add_metric_item(metrics_grid, "粗糙 (Ra):", 1, 1)
+        lbl_post_3d = ctk.CTkLabel(col2_post, text="3D 切口断面形貌扫描", font=ctk.CTkFont(size=10), text_color="#94a3b8")
+        lbl_post_3d.pack(anchor="w")
+        self.fig_cut_3d = plt.Figure(figsize=(2.8, 1.2), facecolor='#0f172a')
+        self.ax_cut_3d = self.fig_cut_3d.add_subplot(111)
+        self.canvas_cut_3d = FigureCanvasTkAgg(self.fig_cut_3d, master=col2_post)
+        self.canvas_cut_3d.get_tk_widget().pack(fill="both", expand=True, pady=2)
 
-        # Column 3: Inspection Text summary
+        # Column 3: Metrics + Report Box
         col3_post = ctk.CTkFrame(postcheck_body_frame, fg_color="transparent")
         col3_post.grid(row=0, column=3, sticky="nsew")
+        
+        metrics_frame = ctk.CTkFrame(col3_post, fg_color="#090d16", corner_radius=8)
+        metrics_frame.pack(fill="x", pady=(0, 4))
+        
+        metrics_grid = ctk.CTkFrame(metrics_frame, fg_color="transparent")
+        metrics_grid.pack(fill="both", expand=True, padx=2, pady=1)
+        metrics_grid.grid_columnconfigure(0, weight=1)
+        metrics_grid.grid_columnconfigure(1, weight=1)
+        metrics_grid.grid_columnconfigure(2, weight=1)
+        metrics_grid.grid_columnconfigure(3, weight=1)
+        
+        self.dross_lbl = self.add_metric_item(metrics_grid, "挂渣:", 0, 0)
+        self.burn_lbl = self.add_metric_item(metrics_grid, "溶边:", 0, 1)
+        self.kerf_lbl = self.add_metric_item(metrics_grid, "割缝:", 0, 2)
+        self.rough_lbl = self.add_metric_item(metrics_grid, "粗糙度:", 0, 3)
+
         lbl_sum = ctk.CTkLabel(col3_post, text="质量评估报告与归因", font=ctk.CTkFont(size=10), text_color="#94a3b8")
         lbl_sum.pack(anchor="w")
         self.postcheck_summary_text = ctk.CTkTextbox(col3_post, font=ctk.CTkFont(size=11), fg_color="#16080b", text_color="#f1f5f9", border_width=1, border_color="#311018")
         self.postcheck_summary_text.pack(fill="both", expand=True, pady=2)
-        self.postcheck_summary_text.insert("end", "// 试切完成后，此处将实时展示质量评估报告与缺陷归因诊断。")
+        self.postcheck_summary_text.insert("end", "// 送入检测模型后，此处将展示评估报告与归因诊断。")
         self.postcheck_summary_text.configure(state="disabled")
 
         # ==========================================
@@ -713,8 +796,21 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.sliders_frame.grid_columnconfigure(1, weight=1)
         self.setup_parameter_widgets()
 
-        self.btn_cut = ctk.CTkButton(self.tab_run, text="启动模拟试切 (Simulate Cut)", font=ctk.CTkFont(size=14, weight="bold"), height=42, fg_color="#3b82f6", hover_color="#2563eb", text_color="#ffffff", state="disabled", command=self.trigger_simulation_cut)
+        self.btn_cut = ctk.CTkButton(self.tab_run, text="第一步：启动模拟试切 (Simulate Cut)", font=ctk.CTkFont(size=14, weight="bold"), height=42, fg_color="#3b82f6", hover_color="#2563eb", text_color="#ffffff", state="disabled", command=self.trigger_simulation_cut)
         self.btn_cut.pack(fill="x", padx=10, pady=(5, 10))
+
+        self.btn_analyze = ctk.CTkButton(
+            self.tab_run, 
+            text="第二步：送入 AI 检测模型分析", 
+            font=ctk.CTkFont(size=14, weight="bold"), 
+            height=42, 
+            fg_color="#eab308", 
+            hover_color="#ca8a04", 
+            text_color="#ffffff", 
+            state="disabled", 
+            command=self.trigger_postcut_analysis
+        )
+        self.btn_analyze.pack(fill="x", padx=10, pady=(0, 10))
 
         # Tab 2: Closed-loop tuning advisor
         self.tab_advice.grid_columnconfigure(0, weight=1)
@@ -1121,12 +1217,25 @@ class LaserCuttingCopilotApp(ctk.CTk):
 
         # Scrollable Frame for details
         scroll_details = ctk.CTkScrollableFrame(detail_win, fg_color="#131b32", border_width=1, border_color="#1e293b")
+        
+        # Import button
+        btn_import = ctk.CTkButton(
+            detail_win,
+            text="📥 导入此工艺到运行设置",
+            fg_color="#06b6d4",
+            hover_color="#0891b2",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            height=32,
+            command=lambda: [detail_win.destroy(), self.import_recipe_to_run_settings(recipe)]
+        )
+        
         if recipe.get("is_factory") == 0:
             scroll_details.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+            btn_import.pack(fill="x", padx=20, pady=(0, 8))
             
             btn_delete_pop = ctk.CTkButton(
                 detail_win,
-                text="删除此工艺",
+                text="🗑️ 删除此工艺",
                 fg_color="#ef4444",
                 hover_color="#dc2626",
                 font=ctk.CTkFont(size=12, weight="bold"),
@@ -1135,7 +1244,8 @@ class LaserCuttingCopilotApp(ctk.CTk):
             )
             btn_delete_pop.pack(fill="x", padx=20, pady=(0, 15))
         else:
-            scroll_details.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+            scroll_details.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+            btn_import.pack(fill="x", padx=20, pady=(0, 15))
 
         # Helper function to add key-value rows
         def add_detail_row(parent, label_text, val_text, row_num):
@@ -1206,6 +1316,77 @@ class LaserCuttingCopilotApp(ctk.CTk):
                     self.on_material_change(curr_mat)
             else:
                 messagebox.showerror("删除失败", "无法删除该工艺配方，可能该配方是只读的出厂设定。")
+
+    def import_recipe_to_run_settings(self, recipe):
+        # 1. Update material sidebar menu selection
+        mat = recipe["material"]
+        self.selected_material = mat
+        self.mat_menu.set(mat)
+        
+        # 2. Update thickness options for this material
+        self.update_thickness_options(mat)
+        thick_str = f"{recipe['thickness']:.1f}"
+        if thick_str in self.thick_menu.cget("values"):
+            self.thick_menu.set(thick_str)
+            self.selected_thickness = recipe['thickness']
+        else:
+            vals = list(self.thick_menu.cget("values"))
+            if thick_str not in vals:
+                vals.append(thick_str)
+                vals.sort(key=float)
+                self.thick_menu.configure(values=vals)
+            self.thick_menu.set(thick_str)
+            self.selected_thickness = recipe['thickness']
+            
+        self.reset_workflow()
+        
+        # 3. Import parameter values to sliders and inputs
+        self.running_params = RunningParams()
+        self.running_params.power = recipe["laser_power"]
+        self.running_params.speed = recipe["speed"]
+        self.running_params.gasType = recipe.get("gas_type", "Air")
+        self.running_params.pressure = recipe.get("gas_pressure", 0.0)
+        self.running_params.focus = recipe["focus_position"]
+        self.running_params.nozzle = recipe.get("nozzle", "2.0")
+        self.running_params.compensation = recipe.get("kerf_compensation", 0.15)
+        self.running_params.piercing = recipe.get("piercing_method", "pulse")
+
+        self.enable_parameter_sliders()
+        
+        self.grp_p["slider"].set(recipe["laser_power"])
+        self.set_entry_value(self.grp_p["entry"], f"{recipe['laser_power']:.0f} W")
+        
+        self.grp_s["slider"].set(recipe["speed"])
+        self.set_entry_value(self.grp_s["entry"], f"{recipe['speed']:.0f} mm/min")
+        
+        self.grp_pr["slider"].set(recipe.get("gas_pressure", 0.0))
+        self.set_entry_value(self.grp_pr["entry"], f"{recipe.get('gas_pressure', 0.0):.1f} bar")
+        
+        self.grp_f["slider"].set(recipe["focus_position"])
+        self.set_entry_value(self.grp_f["entry"], f"{recipe['focus_position']:.2f} mm")
+
+        self.gas_menu.configure(state="normal")
+        self.gas_menu.set(recipe.get("gas_type", "Air"))
+        
+        self.piercing_menu.configure(state="normal")
+        self.piercing_menu.set(recipe.get("piercing_method", "pulse"))
+
+        self.nozzle_ent.configure(state="normal")
+        self.nozzle_ent.delete(0, "end")
+        self.nozzle_ent.insert(0, recipe.get("nozzle", "2.0"))
+        
+        self.comp_ent.configure(state="normal")
+        self.comp_ent.delete(0, "end")
+        self.comp_ent.insert(0, f"{recipe.get('kerf_compensation', 0.15):.3f}")
+
+        # Enable cut button
+        self.btn_cut.configure(state="normal")
+        
+        # 4. Switch to Run Settings Tab
+        self.control_tabs.set("运行设置")
+        
+        # Show prompt info
+        messagebox.showinfo("导入成功", f"工艺配方已成功导入到运行设置！\n材质: {mat}, 厚度: {thick_str} mm")
 
     def filter_db_table(self, event):
         q = self.db_search_entry.get()
@@ -1498,7 +1679,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.after(1000, self.finish_simulation_cut)
 
     def finish_simulation_cut(self):
-        self.btn_cut.configure(state="normal", text="启动模拟试切 (Simulate Cut)")
+        self.btn_cut.configure(state="normal", text="第一步：启动模拟试切 (Simulate Cut)")
         
         # Check source recipe id
         source_id = self.recommendation_data["source_recipe_id"] if self.recommendation_data else None
@@ -1529,8 +1710,139 @@ class LaserCuttingCopilotApp(ctk.CTk):
             target=target
         )
 
-        self.last_report = {"report": report, "target_recipe": target}
+        # Store temporarily for the analysis step
+        self.temp_cut_report = report
+        self.temp_cut_target = target
+        
+        # Draw 2D cut graphics
+        self.draw_postcut_visuals(report)
+        
+        # Draw 3D cut cross-section profile
+        self.draw_postcut_3d_profile(report)
+
+        # Reset score dial, labels and update textbox to wait for analysis
+        self.score_lbl.configure(text="--", text_color="#cbd5e1")
+        self.draw_empty_score_gauge()
+        
+        self.dross_lbl.configure(text="--")
+        self.burn_lbl.configure(text="--")
+        self.kerf_lbl.configure(text="--")
+        self.rough_lbl.configure(text="--")
+        
+        self.postcheck_summary_text.configure(state="normal")
+        self.postcheck_summary_text.delete("1.0", "end")
+        self.postcheck_summary_text.insert("end", "【试切已完成】\n断面 2D/3D 扫描图形已生成。\n请点击右侧『第二步：送入 AI 检测模型分析』开始评估切缝质量并获取调参建议。")
+        self.postcheck_summary_text.configure(state="disabled")
+
+        # If it's auto tuning loop, run analysis automatically
+        if self.auto_analyze_after_cut:
+            self.auto_analyze_after_cut = False
+            self.trigger_postcut_analysis()
+        else:
+            # Enable the analysis button
+            self.btn_analyze.configure(state="normal")
+
+    def draw_postcut_3d_profile(self, report):
+        self.ax_cut_3d.clear()
+        self.ax_cut_3d.set_facecolor('#02040a')
+        self.fig_cut_3d.patch.set_facecolor('#0b0f19')
+        
+        thick = self.selected_thickness
+        penetrated = report.get("penetrated", True)
+        kerf = report.get("kerf_width", 0.35)
+        dross = report.get("dross_height", 0.0)
+        rough = report.get("roughness_ra", 3.0)
+        burn = report.get("burning_level", "none")
+        
+        # Generate y (depth) coordinates from 0 down to -thick (100 points)
+        y = np.linspace(0, -thick, 100)
+        
+        xl = np.ones_like(y) * (-kerf / 2.0)
+        xr = np.ones_like(y) * (kerf / 2.0)
+        
+        if penetrated:
+            # 1. Add roughness (Ra) as high frequency waves
+            noise_amp = (rough / 30.0) * 0.08
+            noise_l = np.sin(y * (20 / thick)) * noise_amp + np.random.normal(0, noise_amp * 0.2, len(y))
+            noise_r = np.cos(y * (22 / thick)) * noise_amp + np.random.normal(0, noise_amp * 0.2, len(y))
+            xl += noise_l
+            xr += noise_r
+            
+            # 2. Add overburning (rounding at the top, y close to 0)
+            if burn != "none":
+                burn_decay = 0.8
+                if burn == "light":
+                    burn_decay = 0.3
+                elif burn == "moderate":
+                    burn_decay = 0.5
+                else:
+                    burn_decay = 0.9
+                
+                rounding = np.exp(y * (5 / thick)) * burn_decay * 0.15
+                xl -= rounding
+                xr += rounding
+            
+            # 3. Add bottom dross (bump at bottom, y close to -thick)
+            if dross > 0.05:
+                dross_bump = np.exp(-(y + thick)**2 / (0.1 * thick)**2) * dross * 0.4
+                xl += dross_bump * 0.5
+                xr -= dross_bump * 0.5
+                
+            color_wall = '#10b981' if report["quality_score"] > 85 else '#f59e0b' if report["quality_score"] > 70 else '#f43f5e'
+            self.ax_cut_3d.plot(xl, y, color=color_wall, linewidth=1.5)
+            self.ax_cut_3d.plot(xr, y, color=color_wall, linewidth=1.5)
+            
+            xmin, xmax = -kerf*1.5, kerf*1.5
+            self.ax_cut_3d.fill_betweenx(y, xmin, xl, color='#1e293b', alpha=0.5)
+            self.ax_cut_3d.fill_betweenx(y, xr, xmax, color='#1e293b', alpha=0.5)
+            
+            # Draw nozzle at the top (y > 0)
+            self.ax_cut_3d.plot([-kerf*0.6, -kerf*0.4, kerf*0.4, kerf*0.6], [thick*0.1, 0, 0, thick*0.1], color='#475569', linewidth=2)
+            self.ax_cut_3d.text(0, thick*0.04, "喷嘴", color='#94a3b8', fontsize=7, ha='center', fontfamily='Microsoft YaHei')
+        else:
+            meet_depth = -thick * 0.5
+            y_cut = y[y >= meet_depth]
+            y_solid = y[y < meet_depth]
+            
+            xl_cut = np.linspace(-kerf/2, 0, len(y_cut))
+            xr_cut = np.linspace(kerf/2, 0, len(y_cut))
+            
+            self.ax_cut_3d.plot(xl_cut, y_cut, color='#f43f5e', linewidth=1.5)
+            self.ax_cut_3d.plot(xr_cut, y_cut, color='#f43f5e', linewidth=1.5)
+            
+            xmin, xmax = -kerf*1.5, kerf*1.5
+            self.ax_cut_3d.fill_betweenx(y_cut, xmin, xl_cut, color='#1e293b', alpha=0.5)
+            self.ax_cut_3d.fill_betweenx(y_cut, xr_cut, xmax, color='#1e293b', alpha=0.5)
+            self.ax_cut_3d.fill_betweenx(y_solid, xmin, xmax, color='#3f1e1e', alpha=0.5)
+            
+            self.ax_cut_3d.text(0, meet_depth*0.5, "未切透阻断点", color='#f43f5e', fontsize=7, ha='center', fontfamily='Microsoft YaHei')
+
+        self.ax_cut_3d.set_xlim(-kerf*1.5, kerf*1.5)
+        self.ax_cut_3d.set_ylim(-thick * 1.1, thick * 0.15)
+        self.ax_cut_3d.axhline(0, color='#334155', linestyle='--', linewidth=0.8)
+        self.ax_cut_3d.axhline(-thick, color='#334155', linestyle='--', linewidth=0.8)
+        
+        self.ax_cut_3d.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
+        for spine in self.ax_cut_3d.spines.values():
+            spine.set_visible(False)
+            
+        self.canvas_cut_3d.draw()
+
+    def trigger_postcut_analysis(self):
+        self.btn_analyze.configure(state="disabled", text="📷 缺陷感知与质量分类模型计算中...")
+        self.after(800, self.finish_postcut_analysis)
+
+    def finish_postcut_analysis(self):
+        self.btn_analyze.configure(state="disabled", text="第二步：送入 AI 检测模型分析")
+        
+        if not hasattr(self, "temp_cut_report") or not self.temp_cut_report:
+            return
+            
+        report = self.temp_cut_report
+        target = self.temp_cut_target
         score = report["quality_score"]
+        
+        self.last_report = {"report": report, "target_recipe": target}
 
         # Log entry to database log history
         log_entry = {
@@ -1561,11 +1873,8 @@ class LaserCuttingCopilotApp(ctk.CTk):
         # Update Summary text box
         self.postcheck_summary_text.configure(state="normal")
         self.postcheck_summary_text.delete("1.0", "end")
-        self.postcheck_summary_text.insert("end", f"切缝质量反馈分析：\n{report['visual_summary']}")
+        self.postcheck_summary_text.insert("end", f"切缝缺陷智能感知与评估分析：\n{report['visual_summary']}")
         self.postcheck_summary_text.configure(state="disabled")
-
-        # Draw 2D cut graphics
-        self.draw_postcut_visuals(report)
 
         # Append to trend history & replot Matplotlib
         self.tuning_history.append(score)
@@ -1573,6 +1882,9 @@ class LaserCuttingCopilotApp(ctk.CTk):
 
         # Execute optimization diagnostics
         self.run_closedloop_diagnose(target)
+        
+        # Switch to tuning advice tab
+        self.control_tabs.set("调参建议")
 
     def draw_score_gauge(self, score):
         self.score_canvas.delete("all")
@@ -1857,7 +2169,8 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.log_console.configure(state="disabled")
         self.log_console.see("end")
 
-        # Automatically execute recut
+        # Automatically execute recut and run AI analysis automatically
+        self.auto_analyze_after_cut = True
         self.trigger_simulation_cut()
 
     # ==========================================
