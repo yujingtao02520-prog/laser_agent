@@ -254,11 +254,8 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.create_hardware_limits(sidebar)
 
         # Trigger Buttons
-        self.btn_precheck = ctk.CTkButton(sidebar, text="第一步：板材切前检测", font=ctk.CTkFont(size=13, weight="bold"), height=40, fg_color="#1e293b", hover_color="#334155", text_color="#f1f5f9", command=self.trigger_precut_check)
-        self.btn_precheck.pack(fill="x", padx=20, pady=(20, 10))
-
-        self.btn_recommend = ctk.CTkButton(sidebar, text="第二步：生成工艺推荐", font=ctk.CTkFont(size=13, weight="bold"), height=40, fg_color="#06b6d4", hover_color="#0891b2", text_color="#ffffff", state="disabled", command=self.trigger_recommendation)
-        self.btn_recommend.pack(fill="x", padx=20, pady=10)
+        self.btn_precheck = ctk.CTkButton(sidebar, text="📷 待切板材安全巡检 (可选)", font=ctk.CTkFont(size=13, weight="bold"), height=40, fg_color="#1e293b", hover_color="#334155", text_color="#f1f5f9", command=self.trigger_precut_check)
+        self.btn_precheck.pack(fill="x", padx=20, pady=(20, 20))
 
     def create_status_indicators(self, parent):
         indicator_frame = ctk.CTkFrame(parent, fg_color="#0f172a", corner_radius=10)
@@ -316,7 +313,6 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.tuning_history = []
         self.pending_suggestions = []
         
-        self.btn_recommend.configure(state="disabled")
         self.btn_cut.configure(state="disabled")
         self.btn_apply_tune.configure(state="disabled")
         if hasattr(self, "btn_analyze"):
@@ -376,24 +372,43 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.canvas_cut_3d.draw()
 
     def auto_load_baseline_recipe(self):
-        # Find nearest recipe in DB
-        rec = db.find_nearest_recipe(self.selected_material, self.selected_thickness)
-        if not rec:
-            # Fallback to default mock recommendations if not found
-            rec = recommender.recommend_parameters(self.selected_material, self.selected_thickness)
-            
-        # Set values to running params
+        # 1. Fetch parameters (RAG recommendation + safety cappings)
+        rec = recommender.recommend_parameters(self.selected_material, self.selected_thickness)
+        self.recommendation_data = rec
+
+        # 2. Update decision log console with RAG reasoning
+        self.log_console.configure(state="normal")
+        self.log_console.delete("1.0", "end")
+        for line in rec["reasoning"]:
+            self.log_console.insert("end", f"> {line}\n")
+        if len(rec["warnings"]) > 0:
+            for w in rec["warnings"]:
+                self.log_console.insert("end", f"[[!]安全限制] {w}\n", "warn_tag")
+        self.log_console.tag_config("warn_tag", foreground="#f59e0b")
+        self.log_console.configure(state="disabled")
+
+        # 3. Update Confidence gauge circle
+        self.conf_canvas.delete("all")
+        cx, cy, r = 35, 35, 28
+        conf = rec["confidence"]
+        angle = (conf / 100.0) * 360.0
+        stroke_color = "#10b981" if conf > 85 else "#f59e0b" if conf > 70 else "#f43f5e"
+        self.conf_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=0, extent=359.9, outline="#1e293b", width=4, style="arc")
+        self.conf_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-angle, outline=stroke_color, width=4, style="arc")
+        self.conf_val_lbl.configure(text=f"{conf:.0f}%", text_color=stroke_color)
+
+        # 4. Set values to running params
         self.running_params = RunningParams()
         self.running_params.power = rec["laser_power"]
         self.running_params.speed = rec["speed"]
-        self.running_params.gasType = rec.get("gas_type", "Air")
-        self.running_params.pressure = rec.get("gas_pressure", 0.0)
+        self.running_params.gasType = rec["gas_type"]
+        self.running_params.pressure = rec["gas_pressure"]
         self.running_params.focus = rec["focus_position"]
         self.running_params.nozzle = rec.get("nozzle", "2.0")
         self.running_params.compensation = rec.get("kerf_compensation", 0.15)
         self.running_params.piercing = rec.get("piercing_method", "pulse")
 
-        # Enable sliders and set values
+        # 5. Enable sliders and set values
         self.enable_parameter_sliders()
         
         self.grp_p["slider"].set(rec["laser_power"])
@@ -402,17 +417,17 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.grp_s["slider"].set(rec["speed"])
         self.set_entry_value(self.grp_s["entry"], f"{rec['speed']:.0f} mm/min")
         
-        self.grp_pr["slider"].set(rec.get("gas_pressure", 0.0))
-        self.set_entry_value(self.grp_pr["entry"], f"{rec.get('gas_pressure', 0.0):.1f} bar")
+        self.grp_pr["slider"].set(rec["gas_pressure"])
+        self.set_entry_value(self.grp_pr["entry"], f"{rec['gas_pressure']:.1f} bar")
         
         self.grp_f["slider"].set(rec["focus_position"])
         self.set_entry_value(self.grp_f["entry"], f"{rec['focus_position']:.2f} mm")
 
         self.gas_menu.configure(state="normal")
-        self.gas_menu.set(rec.get("gas_type", "Air"))
+        self.gas_menu.set(rec["gas_type"])
         
         self.piercing_menu.configure(state="normal")
-        self.piercing_menu.set(rec.get("piercing_method", "pulse"))
+        self.piercing_menu.set(rec["piercing_method"])
 
         # Nozzle & Comp text
         self.nozzle_ent.configure(state="normal")
@@ -1499,7 +1514,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.after(800, self.finish_precut_check)
 
     def finish_precut_check(self):
-        self.btn_precheck.configure(state="normal", text="第一步：板材切前检测")
+        self.btn_precheck.configure(state="normal", text="📷 待切板材安全巡检 (可选)")
         
         data = vision.run_precut_inspection(self.selected_material, self.selected_thickness)
         self.precheck_data = data
@@ -1563,104 +1578,14 @@ class LaserCuttingCopilotApp(ctk.CTk):
                 self.precheck_warning_text.insert("end", f"[警告] 【{w['sensor']}】 {w['message']}\n\n")
         self.precheck_warning_text.configure(state="disabled")
 
-        # Enable next step button
-        self.btn_recommend.configure(state="normal")
+    # ==========================================
+
 
     # ==========================================
 
 
-    # STEP 2 HANDLER: PARAMETER RECOMMENDATION
+    # STEP 2 HANDLER: SIMULATED CUT
 
-
-    # ==========================================
-    def trigger_recommendation(self):
-        self.btn_recommend.configure(state="disabled")
-        
-        self.log_console.configure(state="normal")
-        self.log_console.delete("1.0", "end")
-        self.log_console.insert("end", "> 正在调用 RAG 检索结构化案例库...\n> 校验物理厚度与机床安全边界约束...")
-        self.log_console.configure(state="disabled")
-
-        self.after(600, self.finish_recommendation)
-
-    def finish_recommendation(self):
-        self.btn_recommend.configure(state="normal")
-        
-        rec = recommender.recommend_parameters(self.selected_material, self.selected_thickness)
-        self.recommendation_data = rec
-
-        # Log inferences in console
-        self.log_console.configure(state="normal")
-        self.log_console.delete("1.0", "end")
-        for line in rec["reasoning"]:
-            self.log_console.insert("end", f"> {line}\n")
-        if len(rec["warnings"]) > 0:
-            for w in rec["warnings"]:
-                self.log_console.insert("end", f"[[!]安全限制] {w}\n", "warn_tag")
-        self.log_console.tag_config("warn_tag", foreground="#f59e0b")
-        self.log_console.configure(state="disabled")
-
-        # Confidence gauge circle
-        self.conf_canvas.delete("all")
-        cx, cy, r = 35, 35, 28
-        conf = rec["confidence"]
-        angle = (conf / 100.0) * 360.0
-        stroke_color = "#10b981" if conf > 85 else "#f59e0b" if conf > 70 else "#f43f5e"
-        
-        # draw background track circle
-        self.conf_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=0, extent=359.9, outline="#1e293b", width=4, style="arc")
-        # draw progress arc
-        self.conf_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=90, extent=-angle, outline=stroke_color, width=4, style="arc")
-        self.conf_val_lbl.configure(text=f"{conf:.0f}%", text_color=stroke_color)
-
-        # Set values to slider variables
-        self.running_params = RunningParams()
-        self.running_params.power = rec["laser_power"]
-        self.running_params.speed = rec["speed"]
-        self.running_params.gasType = rec["gas_type"]
-        self.running_params.pressure = rec["gas_pressure"]
-        self.running_params.focus = rec["focus_position"]
-        self.running_params.nozzle = rec["nozzle"]
-        self.running_params.compensation = rec["kerf_compensation"]
-        self.running_params.piercing = rec["piercing_method"]
-
-        # Populate GUI sliders
-        self.grp_p["slider"].configure(state="normal")
-        self.grp_p["slider"].set(rec["laser_power"])
-        self.grp_p["entry"].configure(state="normal")
-        self.set_entry_value(self.grp_p["entry"], f"{rec['laser_power']:.0f} W")
-        
-        self.grp_s["slider"].configure(state="normal")
-        self.grp_s["slider"].set(rec["speed"])
-        self.grp_s["entry"].configure(state="normal")
-        self.set_entry_value(self.grp_s["entry"], f"{rec['speed']:.0f} mm/min")
-        
-        self.grp_pr["slider"].configure(state="normal")
-        self.grp_pr["slider"].set(rec["gas_pressure"])
-        self.grp_pr["entry"].configure(state="normal")
-        self.set_entry_value(self.grp_pr["entry"], f"{rec['gas_pressure']:.1f} bar")
-        
-        self.grp_f["slider"].configure(state="normal")
-        self.grp_f["slider"].set(rec["focus_position"])
-        self.grp_f["entry"].configure(state="normal")
-        self.set_entry_value(self.grp_f["entry"], f"{rec['focus_position']:.2f} mm")
-
-        self.gas_menu.configure(state="normal")
-        self.gas_menu.set(rec["gas_type"])
-        self.piercing_menu.configure(state="normal")
-        self.piercing_menu.set(rec["piercing_method"])
-
-        # Nozzle & Comp text
-        self.nozzle_ent.configure(state="normal")
-        self.nozzle_ent.delete(0, "end")
-        self.nozzle_ent.insert(0, rec["nozzle"])
-        
-        self.comp_ent.configure(state="normal")
-        self.comp_ent.delete(0, "end")
-        self.comp_ent.insert(0, f"{rec['kerf_compensation']:.3f}")
-
-        self.enable_parameter_sliders()
-        self.btn_cut.configure(state="normal")
 
     # ==========================================
 
