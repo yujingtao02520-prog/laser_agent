@@ -748,8 +748,8 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.db_search_entry.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         self.db_search_entry.bind("<KeyRelease>", self.filter_db_table)
         
-        self.db_text_box = ctk.CTkTextbox(self.tab_view, font=ctk.CTkFont(family="JetBrains Mono", size=12), fg_color="#020409", text_color="#cbd5e1", border_width=1, border_color="#1e293b")
-        self.db_text_box.grid(row=1, column=0, sticky="nsew")
+        self.db_scroll_frame = ctk.CTkScrollableFrame(self.tab_view, fg_color="#020409", label_text=None, border_width=1, border_color="#1e293b")
+        self.db_scroll_frame.grid(row=1, column=0, sticky="nsew")
         self.populate_db_view()
 
         # Tab 4: Database Add Form
@@ -1018,9 +1018,10 @@ class LaserCuttingCopilotApp(ctk.CTk):
         threading.Thread(target=run_test, daemon=True).start()
 
     def populate_db_view(self, filter_query=None):
-        self.db_text_box.configure(state="normal")
-        self.db_text_box.delete("1.0", "end")
-        
+        # Clear existing widgets
+        for widget in self.db_scroll_frame.winfo_children():
+            widget.destroy()
+            
         recipes = db.get_all_recipes()
         if filter_query:
             q = filter_query.upper()
@@ -1030,29 +1031,124 @@ class LaserCuttingCopilotApp(ctk.CTk):
                 or q in r.get("gas_type", "").upper() 
                 or q in r.get("nozzle", "").upper()
             ]
+
+        # Table Column Headers
+        headers = ["材质", "板厚 (mm)", "功率 (W)", "速度 (mm/min)", "气体", "焦点 (mm)", "操作"]
+        for col_idx in range(7):
+            self.db_scroll_frame.grid_columnconfigure(col_idx, weight=1 if col_idx != 6 else 0)
+
+        # Header Row
+        for col_idx, h_text in enumerate(headers):
+            lbl = ctk.CTkLabel(
+                self.db_scroll_frame, 
+                text=h_text, 
+                font=ctk.CTkFont(size=12, weight="bold"), 
+                text_color="#06b6d4",
+                fg_color="#020617",
+                corner_radius=4,
+                height=30
+            )
+            lbl.grid(row=0, column=col_idx, sticky="ew", padx=2, pady=4)
+
+        # Recipe Rows
+        for row_idx, r in enumerate(recipes):
+            row_bg = "#1e293b" if row_idx % 2 == 0 else "#0f172a"
             
-        h_mat = pad_visual("材质", 14)
-        h_thick = pad_visual("厚度", 10)
-        h_power = pad_visual("功率", 10)
-        h_speed = pad_visual("速度", 12)
-        h_gas = pad_visual("气体", 10)
-        h_focus = pad_visual("焦点", 10)
-        header = f"{h_mat}{h_thick}{h_power}{h_speed}{h_gas}{h_focus}\n"
-        divider = "-" * 66 + "\n"
-        self.db_text_box.insert("end", header)
-        self.db_text_box.insert("end", divider)
-        
-        for r in recipes:
-            r_mat = pad_visual(r['material'], 14)
-            r_thick = pad_visual(f"{r['thickness']:.1f}", 10)
-            r_power = pad_visual(f"{r['laser_power']:.0f}", 10)
-            r_speed = pad_visual(f"{r['speed']:.0f}", 12)
-            r_gas = pad_visual(r['gas_type'], 10)
-            r_focus = pad_visual(f"{r['focus_position']:.1f}", 10)
-            row_str = f"{r_mat}{r_thick}{r_power}{r_speed}{r_gas}{r_focus}\n"
-            self.db_text_box.insert("end", row_str)
+            vals = [
+                r['material'],
+                f"{r['thickness']:.1f}",
+                f"{r['laser_power']:.0f}",
+                f"{r['speed']:.0f}",
+                r.get('gas_type', 'Air'),
+                f"{r['focus_position']:.1f}"
+            ]
             
-        self.db_text_box.configure(state="disabled")
+            for col_idx, val in enumerate(vals):
+                lbl = ctk.CTkLabel(
+                    self.db_scroll_frame, 
+                    text=str(val), 
+                    font=ctk.CTkFont(size=11), 
+                    text_color="#cbd5e1",
+                    fg_color=row_bg,
+                    corner_radius=4,
+                    height=28
+                )
+                lbl.grid(row=row_idx + 1, column=col_idx, sticky="ew", padx=2, pady=2)
+                
+            # Detail button
+            btn_detail = ctk.CTkButton(
+                self.db_scroll_frame, 
+                text="详情", 
+                width=50, 
+                height=24, 
+                font=ctk.CTkFont(size=11, weight="bold"),
+                fg_color="#06b6d4", 
+                hover_color="#0891b2",
+                corner_radius=4,
+                command=lambda rc=r: self.show_recipe_details(rc)
+            )
+            btn_detail.grid(row=row_idx + 1, column=6, padx=2, pady=2)
+
+    def show_recipe_details(self, recipe):
+        import json
+        # Create a new top-level window
+        detail_win = ctk.CTkToplevel(self)
+        detail_win.title(f"工艺参数明细 - ID: {recipe['id']}")
+        detail_win.geometry("520x560")
+        detail_win.configure(fg_color="#0b0f19")
+        detail_win.transient(self)
+        detail_win.grab_set()
+
+        # Title Label
+        title_lbl = ctk.CTkLabel(
+            detail_win, 
+            text=f"📋 {recipe['operator_note']}", 
+            font=ctk.CTkFont(size=14, weight="bold"), 
+            text_color="#06b6d4",
+            wraplength=480
+        )
+        title_lbl.pack(pady=15, padx=20, fill="x")
+
+        # Scrollable Frame for details
+        scroll_details = ctk.CTkScrollableFrame(detail_win, fg_color="#131b32", border_width=1, border_color="#1e293b")
+        scroll_details.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+
+        # Helper function to add key-value rows
+        def add_detail_row(parent, label_text, val_text, row_num):
+            lbl_key = ctk.CTkLabel(parent, text=label_text, font=ctk.CTkFont(size=12, weight="bold"), text_color="#94a3b8", anchor="w")
+            lbl_key.grid(row=row_num, column=0, sticky="w", padx=15, pady=6)
+            lbl_val = ctk.CTkLabel(parent, text=str(val_text), font=ctk.CTkFont(family="JetBrains Mono", size=12), text_color="#f8fafc", anchor="e")
+            lbl_val.grid(row=row_num, column=1, sticky="e", padx=15, pady=6)
+
+        # Populate basic fields
+        add_detail_row(scroll_details, "材质 (Material):", recipe['material'], 0)
+        add_detail_row(scroll_details, "板厚 (Thickness):", f"{recipe['thickness']:.1f} mm", 1)
+        add_detail_row(scroll_details, "激光功率 (Power):", f"{recipe['laser_power']:.0f} W", 2)
+        add_detail_row(scroll_details, "切割速度 (Speed):", f"{recipe['speed']:.0f} mm/min", 3)
+        add_detail_row(scroll_details, "辅助气体 (Gas Type):", recipe.get('gas_type', 'Air'), 4)
+        add_detail_row(scroll_details, "气体气压 (Gas Pressure):", f"{recipe.get('gas_pressure', 0.0):.1f} bar", 5)
+        add_detail_row(scroll_details, "焦点位置 (Focus):", f"{recipe['focus_position']:.2f} mm", 6)
+        add_detail_row(scroll_details, "喷嘴规格 (Nozzle):", recipe.get('nozzle', '--'), 7)
+        add_detail_row(scroll_details, "穿孔方式 (Piercing):", recipe.get('piercing_method', '--'), 8)
+        add_detail_row(scroll_details, "割缝补偿 (Compensation):", f"{recipe.get('kerf_compensation', 0.15):.2f} mm", 9)
+        add_detail_row(scroll_details, "基础评分 (Base Score):", f"{recipe.get('quality_score', 90.0):.1f}%", 10)
+
+        # Configure columns inside details scroll frame
+        scroll_details.grid_columnconfigure(0, weight=1)
+        scroll_details.grid_columnconfigure(1, weight=1)
+
+        # If raw_data (full JSON) is present, render it in a collapsible textbox or block
+        if "raw_data" in recipe:
+            divider = ctk.CTkFrame(scroll_details, height=2, fg_color="#1e293b")
+            divider.grid(row=11, column=0, columnspan=2, sticky="ew", pady=12)
+            
+            json_lbl = ctk.CTkLabel(scroll_details, text="完整 JSON 数据 (高级配置):", font=ctk.CTkFont(size=12, weight="bold"), text_color="#06b6d4", anchor="w")
+            json_lbl.grid(row=12, column=0, columnspan=2, sticky="w", padx=15, pady=(5, 5))
+            
+            json_box = ctk.CTkTextbox(scroll_details, font=ctk.CTkFont(family="JetBrains Mono", size=10), fg_color="#020409", text_color="#a7f3d0", height=200, border_width=1, border_color="#1e293b")
+            json_box.grid(row=13, column=0, columnspan=2, sticky="ew", padx=15, pady=(0, 10))
+            json_box.insert("end", json.dumps(recipe["raw_data"], indent=2, ensure_ascii=False))
+            json_box.configure(state="disabled")
 
     def filter_db_table(self, event):
         q = self.db_search_entry.get()

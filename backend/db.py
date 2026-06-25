@@ -248,6 +248,7 @@ def load_db() -> List[Dict[str, Any]]:
                         "quality_score": 90.0,
                         "defect_type": "none",
                         "operator_note": name,
+                        "raw_data": data,
                     })
                 except Exception as e:
                     print(f"Error parsing database row {rid}: {e}")
