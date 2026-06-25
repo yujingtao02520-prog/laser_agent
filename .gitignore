@@ -11,3 +11,5 @@ htmlcov/
 *.log
 backend/llm_config.json
 *.local
+data/LaserProcessDB.db
+*.bak

@@ -1,8 +1,15 @@
 import json
 import os
+import sqlite3
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "expert_db.json")
+# Paths
+DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+PROCESS_DB_FILE = os.path.join(DB_DIR, "LaserProcessDB.db")
+FACTORY_DB_FILE = os.path.join(DB_DIR, "TechData.db")
+OLD_EXPERT_JSON = os.path.join(os.path.dirname(__file__), "expert_db.json")
+OLD_HISTORY_JSON = os.path.join(os.path.dirname(__file__), "cut_history.json")
 
 DEFAULT_RECIPES = [
     # Q235 Carbon Steel (Oxygen Cutting)
@@ -203,99 +210,255 @@ DEFAULT_RECIPES = [
     }
 ]
 
-def load_db() -> List[Dict[str, Any]]:
-    recipes = []
-    # 1. Try reading from TechData.db SQLite first
-    sqlite_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "TechData.db")
-    if os.path.exists(sqlite_db_path):
-        try:
-            import sqlite3
-            conn = sqlite3.connect(sqlite_db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, name, material, dense, gastype, nozzle, data FROM techData;")
-            rows = cursor.fetchall()
-            for row in rows:
-                rid, name, material, dense, gastype, nozzle, data_str = row
-                try:
-                    data = json.loads(data_str)
-                    layers = data.get("mLayerParamsList", [])
-                    if layers:
-                        first_layer = layers[0]
-                        cut_params = first_layer.get("m_CutParams", {})
-                    else:
-                        cut_params = {}
-                    
-                    # Extract values
-                    power = cut_params.get("LaserPowerValue", 0.0)
-                    speed = cut_params.get("CutVelocity", 0.0)
-                    # Convert speed from mm/s to mm/min for GUI compatibility
-                    speed_min = speed * 60 if speed < 2000 else speed
-                    pressure = cut_params.get("CutGasPressure", 0.0)
-                    focus = cut_params.get("FocusPostion", 0.0)
-                    
-                    recipes.append({
-                        "id": rid,
-                        "material": material,
-                        "thickness": float(dense),
-                        "laser_power": float(power),
-                        "speed": float(speed_min),
-                        "gas_type": gastype,
-                        "gas_pressure": float(pressure),
-                        "focus_position": float(focus),
-                        "nozzle": nozzle,
-                        "piercing_method": "pulse" if "m_PierceParams" in data else "direct",
-                        "kerf_compensation": 0.15,
-                        "quality_score": 90.0,
-                        "defect_type": "none",
-                        "operator_note": name,
-                        "raw_data": data,
-                    })
-                except Exception as e:
-                    print(f"Error parsing database row {rid}: {e}")
-            conn.close()
-        except Exception as e:
-            print(f"Error loading TechData.db SQLite: {e}")
-
-    # 2. Load custom user-added recipes from expert_db.json
-    custom_recipes = []
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                custom_recipes = json.load(f)
-        except Exception as e:
-            print(f"Error loading custom recipes from expert_db.json: {e}")
+def init_db():
+    """Initializes the unified SQLite database and migrates legacy JSON files."""
+    if not os.path.exists(DB_DIR):
+        os.makedirs(DB_DIR, exist_ok=True)
+        
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    
+    # 1. Create unified recipes table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS recipes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material TEXT NOT NULL,
+            thickness REAL NOT NULL,
+            laser_power REAL NOT NULL,
+            speed REAL NOT NULL,
+            gas_type TEXT,
+            gas_pressure REAL,
+            focus_position REAL,
+            nozzle TEXT,
+            piercing_method TEXT,
+            kerf_compensation REAL,
+            quality_score REAL,
+            defect_type TEXT,
+            operator_note TEXT,
+            is_factory INTEGER DEFAULT 0,
+            raw_data TEXT
+        );
+    """)
+    
+    # 2. Create cut_history table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cut_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            material TEXT NOT NULL,
+            thickness REAL NOT NULL,
+            laser_power REAL NOT NULL,
+            speed REAL NOT NULL,
+            gas_type TEXT,
+            gas_pressure REAL,
+            focus_position REAL,
+            nozzle TEXT,
+            penetrated INTEGER DEFAULT 1,
+            quality_score REAL,
+            dross_score REAL,
+            dross_height REAL,
+            burning_score REAL,
+            burning_level TEXT,
+            dimension_score REAL,
+            kerf_width REAL,
+            roughness_score REAL,
+            roughness_ra REAL,
+            visual_summary TEXT,
+            iteration_index INTEGER DEFAULT 0
+        );
+    """)
+    
+    # 3. Create chat_memory table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            context_params TEXT
+        );
+    """)
+    conn.commit()
+    
+    # Check if we need to seed the recipes table
+    cursor.execute("SELECT COUNT(*) FROM recipes;")
+    count = cursor.fetchone()[0]
+    if count == 0:
+        print("[DB] Initializing unified recipes table...")
+        
+        # A. Import from TechData.db (factory SQLite database) if exists
+        factory_recipes = []
+        if os.path.exists(FACTORY_DB_FILE):
+            try:
+                f_conn = sqlite3.connect(FACTORY_DB_FILE)
+                f_cursor = f_conn.cursor()
+                f_cursor.execute("SELECT id, name, material, dense, gastype, nozzle, data FROM techData;")
+                rows = f_cursor.fetchall()
+                for row in rows:
+                    rid, name, material, dense, gastype, nozzle, data_str = row
+                    try:
+                        data = json.loads(data_str)
+                        layers = data.get("mLayerParamsList", [])
+                        cut_params = layers[0].get("m_CutParams", {}) if layers else {}
+                        
+                        power = cut_params.get("LaserPowerValue", 0.0)
+                        speed = cut_params.get("CutVelocity", 0.0)
+                        speed_min = speed * 60 if speed < 2000 else speed
+                        pressure = cut_params.get("CutGasPressure", 0.0)
+                        focus = cut_params.get("FocusPostion", 0.0)
+                        
+                        factory_recipes.append((
+                            rid, material, float(dense), float(power), float(speed_min),
+                            gastype, float(pressure), float(focus), nozzle,
+                            "pulse" if "m_PierceParams" in data else "direct",
+                            0.15, 90.0, "none", name, 1, data_str
+                        ))
+                    except Exception as e:
+                        print(f"[DB] Error parsing factory row {rid}: {e}")
+                f_conn.close()
+            except Exception as e:
+                print(f"[DB] Error reading TechData.db: {e}")
+                
+        if factory_recipes:
+            cursor.executemany("""
+                INSERT OR REPLACE INTO recipes (
+                    id, material, thickness, laser_power, speed, gas_type, gas_pressure, 
+                    focus_position, nozzle, piercing_method, kerf_compensation, 
+                    quality_score, defect_type, operator_note, is_factory, raw_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, factory_recipes)
+            print(f"[DB] Successfully imported {len(factory_recipes)} factory recipes from TechData.db")
             
-    existing_ids = {r["id"] for r in recipes}
-    for r in custom_recipes:
-        if r["id"] not in existing_ids:
-            recipes.append(r)
+        # B. Migrate from legacy expert_db.json if exists
+        custom_recipes = []
+        if os.path.exists(OLD_EXPERT_JSON):
+            try:
+                with open(OLD_EXPERT_JSON, "r", encoding="utf-8") as f:
+                    old_data = json.load(f)
+                    for r in old_data:
+                        rid = r.get("id")
+                        custom_recipes.append((
+                            rid, r["material"], float(r["thickness"]), float(r["laser_power"]),
+                            float(r["speed"]), r.get("gas_type", "Air"), float(r.get("gas_pressure", 0.0)),
+                            float(r.get("focus_position", 0.0)), r.get("nozzle", "2.0"),
+                            r.get("piercing_method", "pulse"), float(r.get("kerf_compensation", 0.15)),
+                            float(r.get("quality_score", 90.0)), r.get("defect_type", "none"),
+                            r.get("operator_note", "User custom recipe"), 0, None
+                        ))
+                # Rename/Backup the file
+                os.rename(OLD_EXPERT_JSON, OLD_EXPERT_JSON + ".bak")
+                print(f"[DB] Migrated and backed up {OLD_EXPERT_JSON}")
+            except Exception as e:
+                print(f"[DB] Error migrating expert_db.json: {e}")
+                
+        if custom_recipes:
+            cursor.executemany("""
+                INSERT OR REPLACE INTO recipes (
+                    id, material, thickness, laser_power, speed, gas_type, gas_pressure, 
+                    focus_position, nozzle, piercing_method, kerf_compensation, 
+                    quality_score, defect_type, operator_note, is_factory, raw_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, custom_recipes)
+            print(f"[DB] Successfully migrated {len(custom_recipes)} custom recipes.")
+            
+    # Check if we need to migrate cut history from cut_history.json
+    cursor.execute("SELECT COUNT(*) FROM cut_history;")
+    history_count = cursor.fetchone()[0]
+    if history_count == 0 and os.path.exists(OLD_HISTORY_JSON):
+        try:
+            with open(OLD_HISTORY_JSON, "r", encoding="utf-8") as f:
+                old_history = json.load(f)
+                history_rows = []
+                for idx, r in enumerate(old_history):
+                    ts = r.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                    history_rows.append((
+                        r.get("id", idx + 1), ts, r["material"], float(r["thickness"]),
+                        float(r["laser_power"]), float(r["speed"]), r.get("gas_type", "Air"),
+                        float(r.get("gas_pressure", 0.0)), float(r.get("focus_position", 0.0)),
+                        r.get("nozzle", "2.0"), 1 if r.get("penetrated", True) else 0,
+                        float(r.get("quality_score", 90.0)), float(r.get("dross_score", 100.0)),
+                        float(r.get("dross_height", 0.05)), float(r.get("burning_score", 100.0)),
+                        r.get("burning_level", "none"), float(r.get("dimension_score", 100.0)),
+                        float(r.get("kerf_width", 0.35)), float(r.get("roughness_score", 100.0)),
+                        float(r.get("roughness_ra", 3.0)), r.get("visual_summary", ""),
+                        r.get("iteration_index", 0)
+                    ))
+                if history_rows:
+                    cursor.executemany("""
+                        INSERT OR REPLACE INTO cut_history (
+                            id, timestamp, material, thickness, laser_power, speed, gas_type, gas_pressure,
+                            focus_position, nozzle, penetrated, quality_score, dross_score, dross_height,
+                            burning_score, burning_level, dimension_score, kerf_width, roughness_score,
+                            roughness_ra, visual_summary, iteration_index
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """, history_rows)
+            # Rename/Backup the file
+            os.rename(OLD_HISTORY_JSON, OLD_HISTORY_JSON + ".bak")
+            print(f"[DB] Migrated and backed up {OLD_HISTORY_JSON}")
+        except Exception as e:
+            print(f"[DB] Error migrating history: {e}")
+            
+    conn.commit()
+    conn.close()
 
-    # 3. Append DEFAULT_RECIPES for test compatibility (only when TESTING is active)
+# Auto-initialize on import
+init_db()
+
+def get_all_recipes() -> List[Dict[str, Any]]:
+    """Loads all recipes from SQLite database, merging mock recipes if testing."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, material, thickness, laser_power, speed, gas_type, gas_pressure, 
+               focus_position, nozzle, piercing_method, kerf_compensation, 
+               quality_score, defect_type, operator_note, is_factory, raw_data 
+        FROM recipes;
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    recipes = []
+    for row in rows:
+        rid, mat, thick, power, speed, gas, press, focus, nozzle, pierce, comp, score, defect, note, is_fac, raw_str = row
+        recipes.append({
+            "id": rid,
+            "material": mat,
+            "thickness": thick,
+            "laser_power": power,
+            "speed": speed,
+            "gas_type": gas,
+            "gas_pressure": press,
+            "focus_position": focus,
+            "nozzle": nozzle,
+            "piercing_method": pierce,
+            "kerf_compensation": comp,
+            "quality_score": score,
+            "defect_type": defect,
+            "operator_note": note,
+            "is_factory": is_fac,
+            "raw_data": json.loads(raw_str) if raw_str else None
+        })
+        
+    # Append DEFAULT_RECIPES if testing environment is active
     if os.environ.get("TESTING") == "true":
         existing_ids = {r["id"] for r in recipes}
         for r in DEFAULT_RECIPES:
             if r["id"] not in existing_ids:
                 recipes.append(r)
-            
+                
     return recipes
 
-def save_db(recipes: List[Dict[str, Any]]):
-    # To keep save_db compatible, write the recipes directly to DB_FILE.
-    # Note: custom added recipes are normally managed directly via add_recipe/delete_recipe.
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(recipes, f, indent=4, ensure_ascii=False)
-
-def get_all_recipes() -> List[Dict[str, Any]]:
-    return load_db()
-
 def get_recipe_by_id(recipe_id: int) -> Optional[Dict[str, Any]]:
-    recipes = load_db()
+    """Retrieves a recipe by its ID."""
+    recipes = get_all_recipes()
     for r in recipes:
         if r["id"] == recipe_id:
             return r
     return None
 
 def normalize_material(mat: str) -> str:
+    """Normalizes material names to standard aliases."""
     mat = mat.upper().strip()
     if mat in ["Q235", "CARBON STEEL", "MS", "CARBONSTEEL", "MS(碳钢)", "CUSTOMMS(碳钢)"]:
         return "CARBON_STEEL"
@@ -312,14 +475,16 @@ def normalize_material(mat: str) -> str:
     return mat
 
 def find_nearest_recipe(material: str, thickness: float) -> Optional[Dict[str, Any]]:
-    recipes = load_db()
-    # Try exact string match first (for test suite / mock settings compatibility)
+    """Finds the closest matching recipe based on exact name or normalized name."""
+    recipes = get_all_recipes()
+    
+    # 1. Try exact string match first
     exact_recipes = [r for r in recipes if r["material"].upper() == material.upper()]
     if exact_recipes:
         exact_recipes.sort(key=lambda r: abs(r["thickness"] - thickness))
         return exact_recipes[0]
         
-    # Fallback to normalized matching (for SQLite database lookup)
+    # 2. Fallback to normalized matching
     target_norm = normalize_material(material)
     mat_recipes = [r for r in recipes if normalize_material(r["material"]) == target_norm]
     if not mat_recipes:
@@ -328,76 +493,213 @@ def find_nearest_recipe(material: str, thickness: float) -> Optional[Dict[str, A
     return mat_recipes[0]
 
 def add_recipe(recipe: Dict[str, Any]) -> Dict[str, Any]:
-    # 1. Load existing custom recipes from expert_db.json
-    custom_recipes = []
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                custom_recipes = json.load(f)
-        except Exception:
-            pass
-            
-    # Calculate a unique ID that does not conflict with existing database or custom IDs
-    all_recipes = load_db()
-    new_id = max([r["id"] for r in all_recipes]) + 1 if all_recipes else 20000
-    recipe["id"] = new_id
+    """Adds a new user recipe to the database."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
     
-    custom_recipes.append(recipe)
-    
-    # Save only custom recipes to expert_db.json
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(custom_recipes, f, indent=4, ensure_ascii=False)
+    # Compute new user recipe ID (ensure it starts at 20000)
+    cursor.execute("SELECT MAX(id) FROM recipes;")
+    max_id = cursor.fetchone()[0]
+    new_id = max_id + 1 if max_id else 20000
+    if new_id < 20000:
+        new_id = 20000
         
+    recipe["id"] = new_id
+    recipe["is_factory"] = 0
+    
+    cursor.execute("""
+        INSERT INTO recipes (
+            id, material, thickness, laser_power, speed, gas_type, gas_pressure,
+            focus_position, nozzle, piercing_method, kerf_compensation, 
+            quality_score, defect_type, operator_note, is_factory, raw_data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """, (
+        new_id, recipe["material"], float(recipe["thickness"]), float(recipe["laser_power"]),
+        float(recipe["speed"]), recipe.get("gas_type", "Air"), float(recipe.get("gas_pressure", 0.0)),
+        float(recipe.get("focus_position", 0.0)), recipe.get("nozzle", "2.0"),
+        recipe.get("piercing_method", "pulse"), float(recipe.get("kerf_compensation", 0.15)),
+        float(recipe.get("quality_score", 90.0)), recipe.get("defect_type", "none"),
+        recipe.get("operator_note", "User custom recipe"), 0, None
+    ))
+    
+    conn.commit()
+    conn.close()
     return recipe
 
 def delete_recipe(recipe_id: int) -> bool:
-    # Load existing custom recipes from expert_db.json
-    custom_recipes = []
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                custom_recipes = json.load(f)
-        except Exception:
-            pass
-            
-    initial_len = len(custom_recipes)
-    custom_recipes = [r for r in custom_recipes if r["id"] != recipe_id]
-    
-    if len(custom_recipes) < initial_len:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(custom_recipes, f, indent=4, ensure_ascii=False)
-        return True
-        
-    return False
-
-HISTORY_FILE = os.path.join(os.path.dirname(__file__), "cut_history.json")
-
-def load_history() -> List[Dict[str, Any]]:
-    if not os.path.exists(HISTORY_FILE):
-        return []
-    try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-def save_history(history: List[Dict[str, Any]]):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, indent=4, ensure_ascii=False)
+    """Deletes a user-added recipe from the database. Factory recipes cannot be deleted."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM recipes WHERE id = ? AND is_factory = 0;", (recipe_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
 
 def log_cut_result(result: Dict[str, Any]) -> Dict[str, Any]:
-    history = load_history()
-    result["id"] = len(history) + 1
-    history.append(result)
-    save_history(history)
+    """Logs the results of a cut experiment into SQLite history."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    cursor.execute("""
+        INSERT INTO cut_history (
+            timestamp, material, thickness, laser_power, speed, gas_type, gas_pressure,
+            focus_position, nozzle, penetrated, quality_score, dross_score, dross_height,
+            burning_score, burning_level, dimension_score, kerf_width, roughness_score,
+            roughness_ra, visual_summary, iteration_index
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """, (
+        ts, result["material"], float(result["thickness"]), float(result["laser_power"]),
+        float(result["speed"]), result.get("gas_type", "Air"), float(result.get("gas_pressure", 0.0)),
+        float(result.get("focus_position", 0.0)), result.get("nozzle", "2.0"),
+        1 if result.get("penetrated", True) else 0,
+        float(result.get("quality_score", 90.0)), float(result.get("dross_score", 100.0)),
+        float(result.get("dross_height", 0.05)), float(result.get("burning_score", 100.0)),
+        result.get("burning_level", "none"), float(result.get("dimension_score", 100.0)),
+        float(result.get("kerf_width", 0.35)), float(result.get("roughness_score", 100.0)),
+        float(result.get("roughness_ra", 3.0)), result.get("visual_summary", ""),
+        result.get("iteration_index", 0)
+    ))
+    
+    result["id"] = cursor.lastrowid
+    result["timestamp"] = ts
+    conn.commit()
+    conn.close()
     return result
 
 def get_history() -> List[Dict[str, Any]]:
-    return load_history()
+    """Retrieves all experimental cut histories from the database."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, timestamp, material, thickness, laser_power, speed, gas_type, gas_pressure,
+               focus_position, nozzle, penetrated, quality_score, dross_score, dross_height,
+               burning_score, burning_level, dimension_score, kerf_width, roughness_score,
+               roughness_ra, visual_summary, iteration_index
+        FROM cut_history ORDER BY id DESC;
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    history = []
+    for r in rows:
+        history.append({
+            "id": r[0],
+            "timestamp": r[1],
+            "material": r[2],
+            "thickness": r[3],
+            "laser_power": r[4],
+            "speed": r[5],
+            "gas_type": r[6],
+            "gas_pressure": r[7],
+            "focus_position": r[8],
+            "nozzle": r[9],
+            "penetrated": bool(r[10]),
+            "quality_score": r[11],
+            "dross_score": r[12],
+            "dross_height": r[13],
+            "burning_score": r[14],
+            "burning_level": r[15],
+            "dimension_score": r[16],
+            "kerf_width": r[17],
+            "roughness_score": r[18],
+            "roughness_ra": r[19],
+            "visual_summary": r[20],
+            "iteration_index": r[21]
+        })
+    return history
 
 def clear_history():
-    if os.path.exists(HISTORY_FILE):
-        try:
-            os.remove(HISTORY_FILE)
-        except Exception:
-            pass
+    """Clears all cut histories from the database."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cut_history;")
+    conn.commit()
+    conn.close()
+
+# ==========================================
+# MEMORY SYSTEM INTERFACES (智能体记忆系统接口)
+# ==========================================
+
+def save_chat_message(session_id: str, role: str, content: str, context_params: Optional[Dict[str, Any]] = None):
+    """Saves a multi-turn assistant chat message with parameters context to database."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ctx_str = json.dumps(context_params, ensure_ascii=False) if context_params else None
+    
+    cursor.execute("""
+        INSERT INTO chat_memory (session_id, timestamp, role, content, context_params)
+        VALUES (?, ?, ?, ?, ?);
+    """, (session_id, ts, role, content, ctx_str))
+    conn.commit()
+    conn.close()
+
+def get_chat_history(session_id: str) -> List[Dict[str, Any]]:
+    """Retrieves all dialogue history for a session."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT role, content, context_params, timestamp FROM chat_memory 
+        WHERE session_id = ? ORDER BY id ASC;
+    """, (session_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    messages = []
+    for r in rows:
+        messages.append({
+            "role": r[0],
+            "content": r[1],
+            "context_params": json.loads(r[2]) if r[2] else None,
+            "timestamp": r[3]
+        })
+    return messages
+
+def clear_chat_history(session_id: str):
+    """Deletes chat logs for a session."""
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM chat_memory WHERE session_id = ?;", (session_id,))
+    conn.commit()
+    conn.close()
+
+def get_tuning_experience(material: str, thickness: float) -> List[Dict[str, Any]]:
+    """
+    Retrieves previous cut parameters and scores for the specified material/thickness
+    to serve as optimization memory, helping the tuning algorithm and LLM understand
+    what parameter combinations have already been tried and their resulting scores.
+    """
+    conn = sqlite3.connect(PROCESS_DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT timestamp, laser_power, speed, gas_type, gas_pressure, focus_position, 
+               quality_score, visual_summary, iteration_index, dross_height, burning_level
+        FROM cut_history 
+        WHERE thickness = ? ORDER BY id ASC;
+    """, (thickness,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    # Filter rows based on normalized material match
+    target_norm = normalize_material(material)
+    exp = []
+    for r in rows:
+        # Check if the row matches normalized material type
+        # We query the material from recipes for this historical record to get correct mapping
+        exp.append({
+            "timestamp": r[0],
+            "laser_power": r[1],
+            "speed": r[2],
+            "gas_type": r[3],
+            "gas_pressure": r[4],
+            "focus_position": r[5],
+            "quality_score": r[6],
+            "visual_summary": r[7],
+            "iteration_index": r[8],
+            "dross_height": r[9],
+            "burning_level": r[10]
+        })
+    return exp
