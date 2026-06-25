@@ -241,15 +241,8 @@ class LaserCuttingCopilotApp(ctk.CTk):
         thick_label.pack(anchor="w", pady=(5, 2))
         
         self.thick_menu = ctk.CTkOptionMenu(form_frame, command=self.on_thickness_change, fg_color="#131b32", button_color="#0f172a", text_color="#f8fafc", dropdown_fg_color="#0d1324")
-        self.thick_menu.pack(fill="x", pady=(0, 10))
+        self.thick_menu.pack(fill="x", pady=(0, 20))
         self.update_thickness_options("SUS304")
-
-        # 3. Drawing Select
-        draw_label = ctk.CTkLabel(form_frame, text="切割图纸 (DXF)", font=ctk.CTkFont(size=13, weight="bold"), text_color="#f8fafc")
-        draw_label.pack(anchor="w", pady=(5, 2))
-        
-        self.draw_menu = ctk.CTkOptionMenu(form_frame, values=["法兰盘 (flange.dxf)", "机械齿轮 (gear.dxf)", "固定支架 (bracket.dxf)"], fg_color="#131b32", button_color="#0f172a", text_color="#f8fafc", dropdown_fg_color="#0d1324")
-        self.draw_menu.pack(fill="x", pady=(0, 20))
 
         # Hardware limits box
         self.create_hardware_limits(sidebar)
@@ -1075,11 +1068,14 @@ class LaserCuttingCopilotApp(ctk.CTk):
                 )
                 lbl.grid(row=row_idx + 1, column=col_idx, sticky="ew", padx=2, pady=2)
                 
-            # Detail button
+            # Operations frame
+            btn_frame = ctk.CTkFrame(self.db_scroll_frame, fg_color=row_bg, height=28)
+            btn_frame.grid(row=row_idx + 1, column=6, sticky="ew", padx=2, pady=2)
+            
             btn_detail = ctk.CTkButton(
-                self.db_scroll_frame, 
+                btn_frame, 
                 text="详情", 
-                width=50, 
+                width=45, 
                 height=24, 
                 font=ctk.CTkFont(size=11, weight="bold"),
                 fg_color="#06b6d4", 
@@ -1087,7 +1083,21 @@ class LaserCuttingCopilotApp(ctk.CTk):
                 corner_radius=4,
                 command=lambda rc=r: self.show_recipe_details(rc)
             )
-            btn_detail.grid(row=row_idx + 1, column=6, padx=2, pady=2)
+            btn_detail.pack(side="left", padx=2, pady=2)
+            
+            if r.get("is_factory") == 0:
+                btn_delete = ctk.CTkButton(
+                    btn_frame, 
+                    text="删除", 
+                    width=45, 
+                    height=24, 
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    fg_color="#ef4444", 
+                    hover_color="#dc2626",
+                    corner_radius=4,
+                    command=lambda rc=r: self.confirm_delete_recipe(rc)
+                )
+                btn_delete.pack(side="left", padx=2, pady=2)
 
     def show_recipe_details(self, recipe):
         import json
@@ -1111,7 +1121,21 @@ class LaserCuttingCopilotApp(ctk.CTk):
 
         # Scrollable Frame for details
         scroll_details = ctk.CTkScrollableFrame(detail_win, fg_color="#131b32", border_width=1, border_color="#1e293b")
-        scroll_details.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        if recipe.get("is_factory") == 0:
+            scroll_details.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+            
+            btn_delete_pop = ctk.CTkButton(
+                detail_win,
+                text="删除此工艺",
+                fg_color="#ef4444",
+                hover_color="#dc2626",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                height=32,
+                command=lambda: [detail_win.destroy(), self.confirm_delete_recipe(recipe)]
+            )
+            btn_delete_pop.pack(fill="x", padx=20, pady=(0, 15))
+        else:
+            scroll_details.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
         # Helper function to add key-value rows
         def add_detail_row(parent, label_text, val_text, row_num):
@@ -1149,6 +1173,39 @@ class LaserCuttingCopilotApp(ctk.CTk):
             json_box.grid(row=13, column=0, columnspan=2, sticky="ew", padx=15, pady=(0, 10))
             json_box.insert("end", json.dumps(recipe["raw_data"], indent=2, ensure_ascii=False))
             json_box.configure(state="disabled")
+
+    def confirm_delete_recipe(self, recipe):
+        confirm = messagebox.askyesno(
+            "确认删除",
+            f"您确定要删除以下工艺配方吗？此操作无法撤销。\n\n"
+            f"材质: {recipe['material']}\n"
+            f"厚度: {recipe['thickness']:.1f} mm\n"
+            f"功率: {recipe['laser_power']:.0f} W\n"
+            f"速度: {recipe['speed']:.0f} mm/min\n"
+            f"气体: {recipe.get('gas_type', 'Air')}"
+        )
+        if confirm:
+            deleted = db.delete_recipe(recipe["id"])
+            if deleted:
+                messagebox.showinfo("删除成功", "该工艺配方已成功从工艺库中删除。")
+                self.load_materials_data()
+                self.populate_db_view()
+                
+                # Refresh sidebar material menu options
+                mat_options = list(self.materials_map.keys())
+                self.mat_menu.configure(values=mat_options)
+                
+                # If current selection is gone or invalid, reset it
+                curr_mat = self.mat_menu.get()
+                if curr_mat not in self.materials_map:
+                    if mat_options:
+                        self.mat_menu.set(mat_options[0])
+                        self.on_material_change(mat_options[0])
+                else:
+                    # Update thickness options for current material
+                    self.on_material_change(curr_mat)
+            else:
+                messagebox.showerror("删除失败", "无法删除该工艺配方，可能该配方是只读的出厂设定。")
 
     def filter_db_table(self, event):
         q = self.db_search_entry.get()
