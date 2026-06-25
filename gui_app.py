@@ -395,10 +395,12 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.tuning_history = []
         self.pending_suggestions = []
         
-        self.btn_cut.configure(state="disabled")
+        self.btn_cut.configure(state="disabled", text="第一步：启动机床试切 (Start Machine Cut)")
         self.btn_apply_tune.configure(state="disabled")
+        if hasattr(self, "btn_upload"):
+            self.btn_upload.configure(state="disabled", text="第二步：拍照并上传检测数据 (Upload Seam Data)")
         if hasattr(self, "btn_analyze"):
-            self.btn_analyze.configure(state="disabled", text="第二步：送入 AI 检测模型分析")
+            self.btn_analyze.configure(state="disabled", text="第三步：送入 AI 检测模型分析 (Run AI Analysis)")
         
         self.draw_clean_postcut_canvas()
         self.draw_empty_trend_chart()
@@ -416,6 +418,13 @@ class LaserCuttingCopilotApp(ctk.CTk):
         
         self.disable_parameter_sliders()
         self.reset_sliders_labels()
+
+    def set_workflow_buttons_initial(self):
+        self.btn_cut.configure(state="normal", text="第一步：启动机床试切 (Start Machine Cut)")
+        if hasattr(self, "btn_upload"):
+            self.btn_upload.configure(state="disabled", text="第二步：拍照并上传检测数据 (Upload Seam Data)")
+        if hasattr(self, "btn_analyze"):
+            self.btn_analyze.configure(state="disabled", text="第三步：送入 AI 检测模型分析 (Run AI Analysis)")
         
         self.score_lbl.configure(text="--")
         self.draw_empty_score_gauge()
@@ -518,7 +527,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.comp_ent.insert(0, f"{rec.get('kerf_compensation', 0.15):.3f}")
 
         # Enable cut button
-        self.btn_cut.configure(state="normal")
+        self.set_workflow_buttons_initial()
 
     # ==========================================
 
@@ -843,12 +852,25 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.sliders_frame.grid_columnconfigure(1, weight=1)
         self.setup_parameter_widgets()
 
-        self.btn_cut = ctk.CTkButton(self.tab_run, text="第一步：启动模拟试切 (Simulate Cut)", font=ctk.CTkFont(size=14, weight="bold"), height=42, fg_color="#3b82f6", hover_color="#2563eb", text_color="#ffffff", state="disabled", command=self.trigger_simulation_cut)
+        self.btn_cut = ctk.CTkButton(self.tab_run, text="第一步：启动机床试切 (Start Machine Cut)", font=ctk.CTkFont(size=14, weight="bold"), height=42, fg_color="#3b82f6", hover_color="#2563eb", text_color="#ffffff", state="disabled", command=self.trigger_simulation_cut)
         self.btn_cut.pack(fill="x", padx=10, pady=(5, 10))
+
+        self.btn_upload = ctk.CTkButton(
+            self.tab_run,
+            text="第二步：拍照并上传检测数据 (Upload Seam Data)",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=42,
+            fg_color="#10b981",
+            hover_color="#059669",
+            text_color="#ffffff",
+            state="disabled",
+            command=self.trigger_data_upload
+        )
+        self.btn_upload.pack(fill="x", padx=10, pady=(0, 10))
 
         self.btn_analyze = ctk.CTkButton(
             self.tab_run, 
-            text="第二步：送入 AI 检测模型分析", 
+            text="第三步：送入 AI 检测模型分析 (Run AI Analysis)", 
             font=ctk.CTkFont(size=14, weight="bold"), 
             height=42, 
             fg_color="#eab308", 
@@ -1471,7 +1493,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.comp_ent.insert(0, f"{recipe.get('kerf_compensation', 0.15):.3f}")
 
         # Enable cut button
-        self.btn_cut.configure(state="normal")
+        self.set_workflow_buttons_initial()
         
         # 4. Switch to Run Settings Tab
         self.control_tabs.set("运行设置")
@@ -1585,7 +1607,8 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.after(1000, self.finish_simulation_cut)
 
     def finish_simulation_cut(self):
-        self.btn_cut.configure(state="normal", text="第一步：启动模拟试切 (Simulate Cut)")
+        # 1. Update Cut button state (disable it for current cycle, show cut completed)
+        self.btn_cut.configure(state="disabled", text="✔️ 第一步：机床试切完成 (工件已取出)")
         
         # Check source recipe id
         source_id = self.recommendation_data["source_recipe_id"] if self.recommendation_data else None
@@ -1616,17 +1639,15 @@ class LaserCuttingCopilotApp(ctk.CTk):
             target=target
         )
 
-        # Store temporarily for the analysis step
+        # Store temporarily for upload & analysis steps
         self.temp_cut_report = report
         self.temp_cut_target = target
         
-        # Draw 2D cut graphics
-        self.draw_postcut_visuals(report)
-        
-        # Draw 3D cut cross-section profile
-        self.draw_postcut_3d_profile(report)
+        # Clear/initialize 2D & 3D graphics (hide until photographed and uploaded!)
+        self.draw_clean_postcut_canvas()
+        self.draw_empty_postcut_3d_chart()
 
-        # Reset score dial, labels and update textbox to wait for analysis
+        # Reset score dial, labels and update textbox to wait for upload
         self.score_lbl.configure(text="--", text_color="#cbd5e1")
         self.draw_empty_score_gauge()
         
@@ -1637,16 +1658,41 @@ class LaserCuttingCopilotApp(ctk.CTk):
         
         self.postcheck_summary_text.configure(state="normal")
         self.postcheck_summary_text.delete("1.0", "end")
-        self.postcheck_summary_text.insert("end", "【试切已完成】\n断面 2D/3D 扫描图形已生成。\n请点击右侧『第二步：送入 AI 检测模型分析』开始评估切缝质量并获取调参建议。")
+        self.postcheck_summary_text.insert("end", "【物理试切切割已完成】\n说明: 工件已在舱内切毕。请取出工件，置于旁边的检测工作台工位中进行照相和断面形貌扫描。\n请点击右侧『第二步：拍照并上传检测数据』开始拍照扫描并同步数据。")
         self.postcheck_summary_text.configure(state="disabled")
 
-        # If it's auto tuning loop, run analysis automatically
+        # If it's auto tuning loop, run analysis automatically (bypass manual photo steps for convenience)
         if self.auto_analyze_after_cut:
             self.auto_analyze_after_cut = False
+            self.finish_data_upload()
             self.trigger_postcut_analysis()
         else:
-            # Enable the analysis button
-            self.btn_analyze.configure(state="normal")
+            # Enable the upload button
+            self.btn_upload.configure(state="normal", text="第二步：拍照并上传检测数据 (Upload Seam Data)")
+
+    def trigger_data_upload(self):
+        self.btn_upload.configure(state="disabled", text="📷 正在从检测工作台拍照、扫描断面并同步上传...")
+        self.after(1000, self.finish_data_upload)
+
+    def finish_data_upload(self):
+        self.btn_upload.configure(state="disabled", text="✔️ 第二步：数据拍照与上传成功")
+        
+        if not hasattr(self, "temp_cut_report") or not self.temp_cut_report:
+            return
+            
+        report = self.temp_cut_report
+        
+        # Now render the uploaded visual graphics! (2D image & 3D profile)
+        self.draw_postcut_visuals(report)
+        self.draw_postcut_3d_profile(report)
+        
+        self.postcheck_summary_text.configure(state="normal")
+        self.postcheck_summary_text.delete("1.0", "end")
+        self.postcheck_summary_text.insert("end", "【工件拍照与检测数据上传成功】\n说明: 切缝 2D 图像和断面 3D 三维扫描数据已传输至软件系统。\n请点击右侧『第三步：送入 AI 检测模型分析』运行 AI 诊断模型评估质量级别。")
+        self.postcheck_summary_text.configure(state="disabled")
+        
+        # Enable the analyze button
+        self.btn_analyze.configure(state="normal", text="第三步：送入 AI 检测模型分析 (Run AI Analysis)")
 
     def draw_postcut_3d_profile(self, report):
         self.ax_cut_3d.clear()
@@ -1739,7 +1785,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.after(800, self.finish_postcut_analysis)
 
     def finish_postcut_analysis(self):
-        self.btn_analyze.configure(state="disabled", text="第二步：送入 AI 检测模型分析")
+        self.set_workflow_buttons_initial()
         
         if not hasattr(self, "temp_cut_report") or not self.temp_cut_report:
             return
