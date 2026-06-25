@@ -87,8 +87,6 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.materials_map = {}
         self.selected_material = "SUS304"
         self.selected_thickness = 3.0
-        self.precheck_done = False
-        self.precheck_data = None
         self.recommendation_data = None
         self.last_report = None
         self.tuning_history = []
@@ -117,9 +115,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.create_right_panel()
 
         # Draw Initial Visuals
-        self.draw_clean_precut_canvas()
         self.draw_clean_postcut_canvas()
-        self.draw_empty_warp_chart()
         self.draw_empty_trend_chart()
         self.draw_empty_postcut_3d_chart()
 
@@ -290,10 +286,6 @@ class LaserCuttingCopilotApp(ctk.CTk):
         # Hardware limits box
         self.create_hardware_limits(sidebar)
 
-        # Trigger Buttons
-        self.btn_precheck = ctk.CTkButton(sidebar, text="📷 待切板材安全巡检 (可选)", font=ctk.CTkFont(size=13, weight="bold"), height=40, fg_color="#1e293b", hover_color="#334155", text_color="#f1f5f9", command=self.trigger_precut_check)
-        self.btn_precheck.pack(fill="x", padx=20, pady=(20, 20))
-
     def create_status_indicators(self, parent):
         indicator_frame = ctk.CTkFrame(parent, fg_color="#0f172a", corner_radius=10)
         indicator_frame.pack(fill="x", padx=20, pady=10)
@@ -398,8 +390,6 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.auto_load_baseline_recipe()
 
     def reset_workflow(self):
-        self.precheck_done = False
-        self.precheck_data = None
         self.recommendation_data = None
         self.last_report = None
         self.tuning_history = []
@@ -410,18 +400,10 @@ class LaserCuttingCopilotApp(ctk.CTk):
         if hasattr(self, "btn_analyze"):
             self.btn_analyze.configure(state="disabled", text="第二步：送入 AI 检测模型分析")
         
-        self.draw_clean_precut_canvas()
         self.draw_clean_postcut_canvas()
-        self.draw_empty_warp_chart()
         self.draw_empty_trend_chart()
         if hasattr(self, "canvas_cut_3d"):
             self.draw_empty_postcut_3d_chart()
-        
-        self.precheck_badge.configure(text="等待检测...", fg_color="#0d1b3e", text_color="#3b82f6")
-        self.precheck_warning_text.configure(state="normal")
-        self.precheck_warning_text.delete("1.0", "end")
-        self.precheck_warning_text.insert("end", "请先在侧边栏触发板面质量检测（可选），以评估板面翘曲及表面污染风险。")
-        self.precheck_warning_text.configure(state="disabled")
 
         self.conf_val_lbl.configure(text="--")
         self.conf_canvas.delete("all")
@@ -549,63 +531,16 @@ class LaserCuttingCopilotApp(ctk.CTk):
         center_frame = ctk.CTkFrame(self, fg_color="transparent")
         center_frame.grid(row=0, column=1, padx=10, pady=15, sticky="nsew")
         center_frame.grid_columnconfigure(0, weight=1)
-        center_frame.grid_rowconfigure(0, weight=3) # Row 0: Pre-cut (needs most space for 3-col layout)
-        center_frame.grid_rowconfigure(1, weight=3) # Row 1: Post-cut (equal to precut)
-        center_frame.grid_rowconfigure(2, weight=4) # Row 2: Analysis & Trend (charts + log)
+        center_frame.grid_rowconfigure(0, weight=3) # Row 0: Post-cut
+        center_frame.grid_rowconfigure(1, weight=4) # Row 1: Analysis & Trend (charts + log)
         
         # ==========================================
-        # 1. Precheck Panel (Row 0)
-        # ==========================================
-        precheck_panel = ctk.CTkFrame(center_frame, corner_radius=16, border_color="#1e293b", border_width=1)
-        precheck_panel.grid(row=0, column=0, padx=0, pady=(0, 10), sticky="nsew")
-        
-        title_pre = ctk.CTkLabel(precheck_panel, text="[01] 视觉感知：切前检测 (2D/3D)", font=ctk.CTkFont(size=14, weight="bold"), text_color="#06b6d4")
-        title_pre.pack(anchor="w", padx=15, pady=(12, 4))
-
-        precheck_body_frame = ctk.CTkFrame(precheck_panel, fg_color="transparent")
-        precheck_body_frame.pack(fill="both", expand=True, padx=15, pady=(0, 12))
-        precheck_body_frame.grid_columnconfigure(0, weight=0, minsize=160)
-        precheck_body_frame.grid_columnconfigure(1, weight=1, minsize=200)
-        precheck_body_frame.grid_columnconfigure(2, weight=1, minsize=200)
-        precheck_body_frame.grid_rowconfigure(0, weight=1)
-        
-        # Column 0: 2D Scanner Canvas
-        left_precheck = ctk.CTkFrame(precheck_body_frame, fg_color="transparent")
-        left_precheck.grid(row=0, column=0, padx=(0, 10), sticky="nsew")
-        lbl_2d = ctk.CTkLabel(left_precheck, text="2D 表面缺陷相机", font=ctk.CTkFont(size=10), text_color="#94a3b8")
-        lbl_2d.pack(anchor="w")
-        self.precut_canvas = tk.Canvas(left_precheck, width=150, height=100, bg="#02040a", highlightthickness=1, highlightbackground="#1e293b")
-        self.precut_canvas.pack(pady=2)
-        self.precheck_badge = ctk.CTkLabel(left_precheck, text="等待检测...", font=ctk.CTkFont(size=11, weight="bold"), fg_color="#0d1b3e", text_color="#3b82f6", corner_radius=4)
-        self.precheck_badge.pack(fill="x", pady=2)
-
-        # Column 1: 3D Flatness Graph
-        middle_precheck = ctk.CTkFrame(precheck_body_frame, fg_color="transparent")
-        middle_precheck.grid(row=0, column=1, padx=(0, 10), sticky="nsew")
-        lbl_3d = ctk.CTkLabel(middle_precheck, text="3D 表面翘曲高度 (mm)", font=ctk.CTkFont(size=10), text_color="#94a3b8")
-        lbl_3d.pack(anchor="w")
-        self.fig_warp = plt.Figure(figsize=(3.2, 1.2), dpi=72, facecolor='#0f172a')
-        self.ax_warp = self.fig_warp.add_subplot(111)
-        self.canvas_warp = FigureCanvasTkAgg(self.fig_warp, master=middle_precheck)
-        self.canvas_warp.get_tk_widget().pack(fill="both", expand=True, pady=2)
-
-        # Column 2: Warnings box
-        right_precheck = ctk.CTkFrame(precheck_body_frame, fg_color="transparent")
-        right_precheck.grid(row=0, column=2, sticky="nsew")
-        lbl_warn = ctk.CTkLabel(right_precheck, text="分析与警告日志", font=ctk.CTkFont(size=10), text_color="#94a3b8")
-        lbl_warn.pack(anchor="w")
-        self.precheck_warning_text = ctk.CTkTextbox(right_precheck, font=ctk.CTkFont(size=11), fg_color="#090d16", text_color="#94a3b8", border_width=1, border_color="#1e293b")
-        self.precheck_warning_text.pack(fill="both", expand=True, pady=2)
-        self.precheck_warning_text.insert("end", "请先在侧边栏触发板材切前检测，以评估板面翘曲及表面污染风险。")
-        self.precheck_warning_text.configure(state="disabled")
-
-        # ==========================================
-        # 2. Postcheck Panel (Row 1)
+        # 1. Postcheck Panel (Row 0)
         # ==========================================
         postcheck_panel = ctk.CTkFrame(center_frame, corner_radius=16, border_color="#1e293b", border_width=1)
-        postcheck_panel.grid(row=1, column=0, padx=0, pady=5, sticky="nsew")
+        postcheck_panel.grid(row=0, column=0, padx=0, pady=(0, 10), sticky="nsew")
         
-        title_post = ctk.CTkLabel(postcheck_panel, text="[02] 视觉反馈：切缝分析与综合质量反馈", font=ctk.CTkFont(size=14, weight="bold"), text_color="#06b6d4")
+        title_post = ctk.CTkLabel(postcheck_panel, text="[01] 视觉反馈：切缝分析与综合质量反馈", font=ctk.CTkFont(size=14, weight="bold"), text_color="#06b6d4")
         title_post.pack(anchor="w", padx=15, pady=(12, 4))
 
         postcheck_body_frame = ctk.CTkFrame(postcheck_panel, fg_color="transparent")
@@ -672,12 +607,12 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.postcheck_summary_text.configure(state="disabled")
 
         # ==========================================
-        # 3. Analysis & Trend Panel (Row 2)
+        # 2. Analysis & Trend Panel (Row 1)
         # ==========================================
         analysis_panel = ctk.CTkFrame(center_frame, corner_radius=16, border_color="#1e293b", border_width=1)
-        analysis_panel.grid(row=2, column=0, padx=0, pady=(5, 0), sticky="nsew")
+        analysis_panel.grid(row=1, column=0, padx=0, pady=(5, 0), sticky="nsew")
         
-        title_analysis = ctk.CTkLabel(analysis_panel, text="[03] 智能诊断：优化趋势与推理链控制台", font=ctk.CTkFont(size=14, weight="bold"), text_color="#06b6d4")
+        title_analysis = ctk.CTkLabel(analysis_panel, text="[02] 智能诊断：优化趋势与推理链控制台", font=ctk.CTkFont(size=14, weight="bold"), text_color="#06b6d4")
         title_analysis.pack(anchor="w", padx=15, pady=(12, 4))
 
         analysis_body_frame = ctk.CTkFrame(analysis_panel, fg_color="transparent")
@@ -1605,24 +1540,10 @@ class LaserCuttingCopilotApp(ctk.CTk):
 
 
     # ==========================================
-    def draw_clean_precut_canvas(self):
-        self.precut_canvas.delete("all")
-        self.precut_canvas.create_rectangle(5, 5, 145, 95, fill="#0c1022", outline="#1e293b", width=1)
-        self.precut_canvas.create_text(75, 50, text="等待切前视觉分析...", fill="#64748b", font=("Segoe UI", 10))
-
     def draw_clean_postcut_canvas(self):
         self.postcut_canvas.delete("all")
         self.postcut_canvas.create_rectangle(5, 5, 165, 87, fill="#0c1022", outline="#1e293b", width=1)
         self.postcut_canvas.create_text(85, 46, text="等待切割结果成像...", fill="#64748b", font=("Segoe UI", 10))
-
-    def draw_empty_warp_chart(self):
-        self.ax_warp.clear()
-        self.ax_warp.set_facecolor('#02040a')
-        self.ax_warp.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, right=False, labelleft=False)
-        for spine in self.ax_warp.spines.values():
-            spine.set_visible(False)
-        self.ax_warp.text(0.5, 0.5, '等待切前检测数据...', horizontalalignment='center', verticalalignment='center', color='#64748b', fontfamily='sans-serif', fontsize=9, transform=self.ax_warp.transAxes)
-        safe_draw(self.canvas_warp, idle=True)
 
     def draw_empty_trend_chart(self):
         self.ax_trend.clear()
@@ -1640,87 +1561,6 @@ class LaserCuttingCopilotApp(ctk.CTk):
     def draw_empty_score_gauge(self):
         cx, cy, r = 35, 35, 28
         self.score_canvas.create_arc(cx-r, cy-r, cx+r, cy+r, start=0, extent=359.9, outline="#1e293b", width=4, style="arc")
-
-    # ==========================================
-
-
-    # STEP 1 HANDLER: PRE-CUT INSPECTION
-
-
-    # ==========================================
-    def trigger_precut_check(self):
-        self.btn_precheck.configure(state="disabled", text="📷 相机采集扫描中...")
-        self.precheck_badge.configure(text="传感器读取中...", fg_color="#2d1a04", text_color="#f59e0b")
-        
-        self.after(800, self.finish_precut_check)
-
-    def finish_precut_check(self):
-        self.btn_precheck.configure(state="normal", text="📷 待切板材安全巡检 (可选)")
-        
-        data = vision.run_precut_inspection(self.selected_material, self.selected_thickness)
-        self.precheck_data = data
-        self.precheck_done = True
-
-        # Render 2D canvas visuals
-        self.precut_canvas.delete("all")
-        self.precut_canvas.create_rectangle(5, 5, 145, 95, fill="#1e293b", outline="#475569", width=2)
-        # draw grid
-        for i in range(10, 140, 15):
-            self.precut_canvas.create_line(i, 5, i, 95, fill="#0f172a")
-        for i in range(10, 90, 15):
-            self.precut_canvas.create_line(5, i, 145, i, fill="#0f172a")
-
-        if data["rust_level"] == "medium":
-            # Rust spots (brown/orange)
-            self.precut_canvas.create_oval(35, 30, 75, 60, fill="#9a3412", outline="")
-            self.precut_canvas.create_oval(45, 45, 90, 75, fill="#ea580c", outline="")
-        elif data["contamination"] == "oil_spot":
-            # Oil spots
-            self.precut_canvas.create_oval(60, 40, 100, 70, fill="#475569", outline="")
-            self.precut_canvas.create_oval(55, 45, 80, 65, fill="#334155", outline="")
-        elif data["contamination"] == "scratches":
-            # Scratches
-            self.precut_canvas.create_line(25, 20, 85, 35, fill="#64748b", width=1)
-            self.precut_canvas.create_line(28, 25, 65, 33, fill="#64748b", width=1)
-            self.precut_canvas.create_line(80, 70, 120, 80, fill="#64748b", width=1)
-
-        # Plot Matplotlib 3D profile
-        self.ax_warp.clear()
-        self.ax_warp.set_facecolor('#02040a')
-        self.fig_warp.patch.set_facecolor('#0b0f19')
-        
-        flatness = data["flatness_profile"]
-        x = np.arange(len(flatness))
-        line_color = '#f43f5e' if data["max_warp"] > 1.0 else '#06b6d4'
-        
-        self.ax_warp.plot(x, flatness, color=line_color, linewidth=1.5)
-        self.ax_warp.scatter(x, flatness, color=line_color, s=8)
-        self.ax_warp.axhline(0, color='#1e293b', linestyle='--', linewidth=1)
-        self.ax_warp.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, labelleft=False)
-        for spine in self.ax_warp.spines.values():
-            spine.set_visible(False)
-            
-        self.ax_warp.text(0.95, 0.85, f"最大翘曲: {data['max_warp']:.1f}mm", horizontalalignment='right', color=line_color, fontfamily='Microsoft YaHei', fontsize=8, transform=self.ax_warp.transAxes)
-        safe_draw(self.canvas_warp)
-
-        # Update warnings Text box
-        self.precheck_warning_text.configure(state="normal")
-        self.precheck_warning_text.delete("1.0", "end")
-        
-        if data["ready_to_cut"]:
-            self.precheck_badge.configure(text="安全已检入 (就绪)", fg_color="#042a18", text_color="#10b981")
-        else:
-            self.precheck_badge.configure(text="警告：板面状态超限", fg_color="#2e050c", text_color="#f43f5e")
-
-        if len(data["warnings"]) == 0:
-            self.precheck_warning_text.insert("end", f"【正常】传感器显示表面平整度及清洁度符合标准。\n说明: {data['surface_notes']}")
-        else:
-            for w in data["warnings"]:
-                self.precheck_warning_text.insert("end", f"[警告] 【{w['sensor']}】 {w['message']}\n\n")
-        self.precheck_warning_text.configure(state="disabled")
-
-    # ==========================================
-
 
     # ==========================================
 
