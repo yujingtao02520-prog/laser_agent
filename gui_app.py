@@ -12,7 +12,7 @@ if sys.platform.startswith("win"):
 
 import json
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 import customtkinter as ctk
 import matplotlib
 matplotlib.use("TkAgg")
@@ -33,6 +33,16 @@ import threading
 # Set theme and color options
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
+
+def safe_draw(canvas, idle=False):
+    """Safely draw a Matplotlib FigureCanvasTkAgg, catching rendering errors."""
+    try:
+        if idle:
+            canvas.draw_idle()
+        else:
+            canvas.draw()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Matplotlib draw error suppressed: {e}")
 
 class RunningParams:
     def __init__(self):
@@ -64,6 +74,9 @@ def pad_visual(text, width, align="left"):
 class LaserCuttingCopilotApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+
+        # Global exception hook: prevent unhandled errors from crashing the app
+        self.report_callback_exception = self._handle_tk_exception
 
         # Window Configurations
         self.title("激光切割工艺 Copilot - 智能决策系统")
@@ -117,6 +130,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         # Handle window resize and font scaling
         self.original_width = 1600
         self.original_height = 920
+        self._configure_job = None  # throttle handle for <Configure> events
         self.register_fonts()
         self.bind("<Configure>", self.on_window_configure)
 
@@ -128,8 +142,21 @@ class LaserCuttingCopilotApp(ctk.CTk):
             self.materials_map[mat] = sorted(list(set([r["thickness"] for r in recipes if r["material"] == mat])))
 
     def on_closing(self):
-        plt.close('all')
+        try:
+            plt.close('all')
+        except Exception:
+            pass
         self.destroy()
+
+    def _handle_tk_exception(self, exc_type, exc_value, exc_tb):
+        """Global Tk exception handler: logs and shows a dialog instead of crashing."""
+        import traceback
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        logging.getLogger(__name__).error(f"Unhandled Tk exception:\n{tb_str}")
+        try:
+            messagebox.showerror("运行时错误", f"发生了一个内部错误，但程序将继续运行。\n\n{exc_value}")
+        except Exception:
+            pass
 
     def register_fonts(self, widget=None):
         if widget is None:
@@ -169,43 +196,49 @@ class LaserCuttingCopilotApp(ctk.CTk):
 
     def on_window_configure(self, event):
         if event.widget == self:
-            w = event.width
-            h = event.height
-            if w <= 100 or h <= 100:
-                return # Skip initial/unmapped state or minimized window
-            
-            # Calculate scaling factor based on current dimensions relative to design dimensions (1600x920)
-            w_scale = w / self.original_width
-            h_scale = h / self.original_height
-            scale_factor = min(w_scale, h_scale)
-            
-            # Bound the scale factor to prevent text from becoming too tiny or huge
-            scale_factor = max(0.75, min(1.5, scale_factor))
-            
-            # 1. Update all registered CTkFont objects
-            for font_id, (font_obj, original_size) in self.font_registry.items():
-                try:
-                    new_size = int(original_size * scale_factor)
-                    new_size = max(8, new_size)
-                    font_obj.configure(size=new_size)
-                except Exception:
-                    pass
-                
-            # 2. Update all registered widgets with tuple/string fonts
-            for widget, (original_font, original_size) in self.widget_fonts.items():
-                try:
-                    new_size = int(original_size * scale_factor)
-                    new_size = max(8, new_size)
-                    if isinstance(original_font, (list, tuple)):
-                        new_font = list(original_font)
-                        new_font[1] = new_size
-                        widget.configure(font=tuple(new_font))
-                    elif isinstance(original_font, str):
-                        parts = original_font.split()
-                        parts[-1] = str(new_size)
-                        widget.configure(font=" ".join(parts))
-                except Exception:
-                    pass
+            # Throttle: cancel any pending configure job and schedule a new one
+            if self._configure_job is not None:
+                self.after_cancel(self._configure_job)
+            self._configure_job = self.after(150, lambda: self._do_font_rescale(event.width, event.height))
+
+    def _do_font_rescale(self, w, h):
+        """Actual font rescaling logic, called after throttle delay."""
+        self._configure_job = None
+        if w <= 100 or h <= 100:
+            return  # Skip initial/unmapped state or minimized window
+
+        # Calculate scaling factor based on current dimensions relative to design dimensions (1600x920)
+        w_scale = w / self.original_width
+        h_scale = h / self.original_height
+        scale_factor = min(w_scale, h_scale)
+
+        # Bound the scale factor to prevent text from becoming too tiny or huge
+        scale_factor = max(0.75, min(1.5, scale_factor))
+
+        # 1. Update all registered CTkFont objects
+        for font_id, (font_obj, original_size) in self.font_registry.items():
+            try:
+                new_size = int(original_size * scale_factor)
+                new_size = max(8, new_size)
+                font_obj.configure(size=new_size)
+            except Exception:
+                pass
+
+        # 2. Update all registered widgets with tuple/string fonts
+        for widget, (original_font, original_size) in self.widget_fonts.items():
+            try:
+                new_size = int(original_size * scale_factor)
+                new_size = max(8, new_size)
+                if isinstance(original_font, (list, tuple)):
+                    new_font = list(original_font)
+                    new_font[1] = new_size
+                    widget.configure(font=tuple(new_font))
+                elif isinstance(original_font, str):
+                    parts = original_font.split()
+                    parts[-1] = str(new_size)
+                    widget.configure(font=" ".join(parts))
+            except Exception:
+                pass
 
     # ==========================================
 
@@ -369,7 +402,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.ax_cut_3d.tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False, left=False, right=False, labelleft=False)
         for spine in self.ax_cut_3d.spines.values():
             spine.set_visible(False)
-        self.canvas_cut_3d.draw()
+        safe_draw(self.canvas_cut_3d)
 
     def auto_load_baseline_recipe(self):
         # 1. Fetch parameters (RAG recommendation + safety cappings)
@@ -487,7 +520,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         middle_precheck.grid(row=0, column=1, padx=(0, 10), sticky="nsew")
         lbl_3d = ctk.CTkLabel(middle_precheck, text="3D 表面翘曲高度 (mm)", font=ctk.CTkFont(size=10), text_color="#94a3b8")
         lbl_3d.pack(anchor="w")
-        self.fig_warp = plt.Figure(figsize=(3.2, 1.2), facecolor='#0f172a')
+        self.fig_warp = plt.Figure(figsize=(3.2, 1.2), dpi=72, facecolor='#0f172a')
         self.ax_warp = self.fig_warp.add_subplot(111)
         self.canvas_warp = FigureCanvasTkAgg(self.fig_warp, master=middle_precheck)
         self.canvas_warp.get_tk_widget().pack(fill="both", expand=True, pady=2)
@@ -543,7 +576,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         col2_post.grid(row=0, column=2, padx=(0, 10), sticky="nsew")
         lbl_post_3d = ctk.CTkLabel(col2_post, text="3D 切口断面形貌扫描", font=ctk.CTkFont(size=10), text_color="#94a3b8")
         lbl_post_3d.pack(anchor="w")
-        self.fig_cut_3d = plt.Figure(figsize=(2.8, 1.2), facecolor='#0f172a')
+        self.fig_cut_3d = plt.Figure(figsize=(2.8, 1.2), dpi=72, facecolor='#0f172a')
         self.ax_cut_3d = self.fig_cut_3d.add_subplot(111)
         self.canvas_cut_3d = FigureCanvasTkAgg(self.fig_cut_3d, master=col2_post)
         self.canvas_cut_3d.get_tk_widget().pack(fill="both", expand=True, pady=2)
@@ -606,7 +639,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         col1_an.grid(row=0, column=1, padx=(0, 10), sticky="nsew")
         lbl_trend = ctk.CTkLabel(col1_an, text="闭环质量优化趋势 (Iteration Curve)", font=ctk.CTkFont(size=10), text_color="#94a3b8")
         lbl_trend.pack(anchor="w")
-        self.fig_trend = plt.Figure(figsize=(3.5, 1.2), facecolor='#0f172a')
+        self.fig_trend = plt.Figure(figsize=(3.5, 1.2), dpi=72, facecolor='#0f172a')
         self.ax_trend = self.fig_trend.add_subplot(111)
         self.canvas_trend = FigureCanvasTkAgg(self.fig_trend, master=col1_an)
         self.canvas_trend.get_tk_widget().pack(fill="both", expand=True, pady=2)
@@ -844,16 +877,44 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.btn_apply_tune = ctk.CTkButton(self.tab_advice, text="一键应用参数修正 & 重新试切", font=ctk.CTkFont(size=13, weight="bold"), height=42, fg_color="#10b981", hover_color="#059669", text_color="#ffffff", state="disabled", command=self.trigger_apply_tuning)
         self.btn_apply_tune.pack(fill="x", padx=15, pady=15)
 
-        # Tab 3: Database View
+        # Tab 3: Database View (using ttk.Treeview for high-performance table)
         self.tab_view.grid_columnconfigure(0, weight=1)
         self.tab_view.grid_rowconfigure(1, weight=1)
-        
+
         self.db_search_entry = ctk.CTkEntry(self.tab_view, placeholder_text="输入材质搜索 (如 Q235, SUS304)...", height=28, fg_color="#131b32", border_color="#1e293b")
         self.db_search_entry.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         self.db_search_entry.bind("<KeyRelease>", self.filter_db_table)
-        
-        self.db_scroll_frame = ctk.CTkScrollableFrame(self.tab_view, fg_color="#020409", label_text=None, border_width=1, border_color="#1e293b")
-        self.db_scroll_frame.grid(row=1, column=0, sticky="nsew")
+
+        # Configure Treeview dark theme style
+        self._setup_treeview_style()
+
+        tree_columns = ("material", "thickness", "power", "speed", "gas", "focus", "score", "source")
+        self.db_tree = ttk.Treeview(
+            self.tab_view, columns=tree_columns, show="headings",
+            style="Dark.Treeview", selectmode="browse"
+        )
+
+        col_config = [
+            ("material", "材质", 70), ("thickness", "板厚(mm)", 65),
+            ("power", "功率(W)", 70), ("speed", "速度(mm/min)", 90),
+            ("gas", "气体", 45), ("focus", "焦点(mm)", 65),
+            ("score", "评分", 50), ("source", "来源", 55)
+        ]
+        for col_id, heading, width in col_config:
+            self.db_tree.heading(col_id, text=heading, anchor="center")
+            self.db_tree.column(col_id, width=width, minwidth=40, anchor="center")
+
+        # Scrollbar
+        tree_scroll = ttk.Scrollbar(self.tab_view, orient="vertical", command=self.db_tree.yview)
+        self.db_tree.configure(yscrollcommand=tree_scroll.set)
+        self.db_tree.grid(row=1, column=0, sticky="nsew")
+        tree_scroll.grid(row=1, column=1, sticky="ns")
+        self.tab_view.grid_columnconfigure(1, weight=0)
+
+        # Bind events: double-click for details, right-click for context menu
+        self.db_tree.bind("<Double-1>", self._on_tree_double_click)
+        self.db_tree.bind("<Button-3>", self._on_tree_right_click)
+
         self.populate_db_view()
 
         # Tab 4: Database Add Form
@@ -1121,94 +1182,110 @@ class LaserCuttingCopilotApp(ctk.CTk):
             self.after(0, update_ui)
         threading.Thread(target=run_test, daemon=True).start()
 
+    def _setup_treeview_style(self):
+        """Configure a dark theme style for ttk.Treeview."""
+        style = ttk.Style(self)
+        style.theme_use("clam")
+
+        style.configure("Dark.Treeview",
+            background="#0b0f19",
+            foreground="#cbd5e1",
+            fieldbackground="#0b0f19",
+            borderwidth=0,
+            font=("Segoe UI", 11),
+            rowheight=28
+        )
+        style.configure("Dark.Treeview.Heading",
+            background="#020617",
+            foreground="#06b6d4",
+            font=("Segoe UI", 11, "bold"),
+            borderwidth=1,
+            relief="flat"
+        )
+        style.map("Dark.Treeview",
+            background=[("selected", "#1e3a5f")],
+            foreground=[("selected", "#38bdf8")]
+        )
+        style.map("Dark.Treeview.Heading",
+            background=[("active", "#0f172a")]
+        )
+        # Scrollbar dark styling
+        style.configure("Vertical.TScrollbar",
+            background="#1e293b", troughcolor="#0b0f19",
+            borderwidth=0, arrowcolor="#64748b"
+        )
+
+        # Tag-based alternating row colors
+        self._tree_tags_configured = True
+
     def populate_db_view(self, filter_query=None):
-        # Clear existing widgets
-        for widget in self.db_scroll_frame.winfo_children():
-            widget.destroy()
-            
+        """Populate the ttk.Treeview with recipe data."""
+        # Clear existing items
+        for item in self.db_tree.get_children():
+            self.db_tree.delete(item)
+
         recipes = db.get_all_recipes()
         if filter_query:
             q = filter_query.upper()
             recipes = [
-                r for r in recipes 
-                if q in r["material"].upper() 
-                or q in r.get("gas_type", "").upper() 
+                r for r in recipes
+                if q in r["material"].upper()
+                or q in r.get("gas_type", "").upper()
                 or q in r.get("nozzle", "").upper()
+                or q in str(r.get("thickness", ""))
             ]
 
-        # Table Column Headers
-        headers = ["材质", "板厚 (mm)", "功率 (W)", "速度 (mm/min)", "气体", "焦点 (mm)", "操作"]
-        for col_idx in range(7):
-            self.db_scroll_frame.grid_columnconfigure(col_idx, weight=1 if col_idx != 6 else 0)
+        # Store recipe data for event handlers
+        self._tree_recipe_map = {}
 
-        # Header Row
-        for col_idx, h_text in enumerate(headers):
-            lbl = ctk.CTkLabel(
-                self.db_scroll_frame, 
-                text=h_text, 
-                font=ctk.CTkFont(size=12, weight="bold"), 
-                text_color="#06b6d4",
-                fg_color="#020617",
-                corner_radius=4,
-                height=30
-            )
-            lbl.grid(row=0, column=col_idx, sticky="ew", padx=2, pady=4)
-
-        # Recipe Rows
-        for row_idx, r in enumerate(recipes):
-            row_bg = "#1e293b" if row_idx % 2 == 0 else "#0f172a"
-            
-            vals = [
+        for idx, r in enumerate(recipes):
+            source = "出厂" if r.get("is_factory") == 1 else "用户"
+            vals = (
                 r['material'],
                 f"{r['thickness']:.1f}",
                 f"{r['laser_power']:.0f}",
                 f"{r['speed']:.0f}",
                 r.get('gas_type', 'Air'),
-                f"{r['focus_position']:.1f}"
-            ]
-            
-            for col_idx, val in enumerate(vals):
-                lbl = ctk.CTkLabel(
-                    self.db_scroll_frame, 
-                    text=str(val), 
-                    font=ctk.CTkFont(size=11), 
-                    text_color="#cbd5e1",
-                    fg_color=row_bg,
-                    corner_radius=4,
-                    height=28
-                )
-                lbl.grid(row=row_idx + 1, column=col_idx, sticky="ew", padx=2, pady=2)
-                
-            # Operations frame
-            btn_frame = ctk.CTkFrame(self.db_scroll_frame, fg_color=row_bg, height=28)
-            btn_frame.grid(row=row_idx + 1, column=6, sticky="ew", padx=2, pady=2)
-            
-            btn_detail = ctk.CTkButton(
-                btn_frame, 
-                text="详情", 
-                width=45, 
-                height=24, 
-                font=ctk.CTkFont(size=11, weight="bold"),
-                fg_color="#06b6d4", 
-                hover_color="#0891b2",
-                corner_radius=4,
-                command=lambda rc=r: self.show_recipe_details(rc)
+                f"{r['focus_position']:.1f}",
+                f"{r.get('quality_score', 90.0):.0f}",
+                source
             )
-            btn_detail.pack(side="left", padx=2, pady=2)
-            
-            if r.get("is_factory") == 0:
-                btn_delete = ctk.CTkButton(
-                    btn_frame, 
-                    text="删除", 
-                    width=45, 
-                    height=24, 
-                    font=ctk.CTkFont(size=11, weight="bold"),
-                    fg_color="#ef4444", 
-                    hover_color="#dc2626",
-                    corner_radius=4,
-                    command=lambda rc=r: self.confirm_delete_recipe(rc)
-                )
-                btn_delete.pack(side="left", padx=2, pady=2)
+            tag = "even" if idx % 2 == 0 else "odd"
+            iid = self.db_tree.insert("", "end", values=vals, tags=(tag,))
+            self._tree_recipe_map[iid] = r
+
+        # Configure alternating row colors
+        self.db_tree.tag_configure("even", background="#0f172a")
+        self.db_tree.tag_configure("odd", background="#1e293b")
+
+    def _on_tree_double_click(self, event):
+        """Handle double-click on a Treeview row to show recipe details."""
+        sel = self.db_tree.selection()
+        if sel:
+            recipe = self._tree_recipe_map.get(sel[0])
+            if recipe:
+                self.show_recipe_details(recipe)
+
+    def _on_tree_right_click(self, event):
+        """Show a context menu on right-click for import/delete."""
+        iid = self.db_tree.identify_row(event.y)
+        if not iid:
+            return
+        self.db_tree.selection_set(iid)
+        recipe = self._tree_recipe_map.get(iid)
+        if not recipe:
+            return
+
+        menu = tk.Menu(self, tearoff=0, bg="#1e293b", fg="#f8fafc",
+                       activebackground="#334155", activeforeground="#38bdf8",
+                       font=("Segoe UI", 10))
+        menu.add_command(label="📋 查看详情", command=lambda: self.show_recipe_details(recipe))
+        menu.add_command(label="📥 导入到运行设置", command=lambda: self.import_recipe_to_run_settings(recipe))
+        if recipe.get("is_factory") == 0:
+            menu.add_separator()
+            menu.add_command(label="🗑️ 删除此工艺", command=lambda: self.confirm_delete_recipe(recipe))
+        menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()
 
     def show_recipe_details(self, recipe):
         import json
@@ -1403,9 +1480,9 @@ class LaserCuttingCopilotApp(ctk.CTk):
         # Show prompt info
         messagebox.showinfo("导入成功", f"工艺配方已成功导入到运行设置！\n材质: {mat}, 厚度: {thick_str} mm")
 
-    def filter_db_table(self, event):
-        q = self.db_search_entry.get()
-        self.populate_db_view(q)
+    def filter_db_table(self, event=None):
+        q = self.db_search_entry.get().strip()
+        self.populate_db_view(q if q else None)
 
     def handle_add_recipe(self):
         try:
@@ -1481,7 +1558,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         for spine in self.ax_warp.spines.values():
             spine.set_visible(False)
         self.ax_warp.text(0.5, 0.5, '等待切前检测数据...', horizontalalignment='center', verticalalignment='center', color='#64748b', fontfamily='sans-serif', fontsize=9, transform=self.ax_warp.transAxes)
-        self.canvas_warp.draw()
+        safe_draw(self.canvas_warp, idle=True)
 
     def draw_empty_trend_chart(self):
         self.ax_trend.clear()
@@ -1490,7 +1567,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         for spine in self.ax_trend.spines.values():
             spine.set_visible(False)
         self.ax_trend.text(0.5, 0.5, '等待闭环质量评分趋势...', horizontalalignment='center', verticalalignment='center', color='#64748b', fontfamily='sans-serif', fontsize=9, transform=self.ax_trend.transAxes)
-        self.canvas_trend.draw()
+        safe_draw(self.canvas_trend, idle=True)
 
     def draw_empty_confidence_gauge(self):
         cx, cy, r = 35, 35, 28
@@ -1560,7 +1637,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
             spine.set_visible(False)
             
         self.ax_warp.text(0.95, 0.85, f"最大翘曲: {data['max_warp']:.1f}mm", horizontalalignment='right', color=line_color, fontfamily='Microsoft YaHei', fontsize=8, transform=self.ax_warp.transAxes)
-        self.canvas_warp.draw()
+        safe_draw(self.canvas_warp)
 
         # Update warnings Text box
         self.precheck_warning_text.configure(state="normal")
@@ -1751,7 +1828,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         for spine in self.ax_cut_3d.spines.values():
             spine.set_visible(False)
             
-        self.canvas_cut_3d.draw()
+        safe_draw(self.canvas_cut_3d)
 
     def trigger_postcut_analysis(self):
         self.btn_analyze.configure(state="disabled", text="📷 缺陷感知与质量分类模型计算中...")
@@ -1916,7 +1993,7 @@ class LaserCuttingCopilotApp(ctk.CTk):
         for spine in self.ax_trend.spines.values():
             spine.set_visible(False)
             
-        self.canvas_trend.draw()
+        safe_draw(self.canvas_trend)
 
     # ==========================================
 
