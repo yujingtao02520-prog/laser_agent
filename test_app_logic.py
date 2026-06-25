@@ -1,6 +1,12 @@
 import sys
 import os
 
+# Reconfigure stdout/stderr for unicode support in GBK environments
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 os.environ["TESTING"] = "true"
 
 # Ensure root is on PATH

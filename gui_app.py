@@ -93,6 +93,10 @@ class LaserCuttingCopilotApp(ctk.CTk):
         self.last_report = None
         self.tuning_history = []
         self.pending_suggestions = []
+        
+        # Machine Limits
+        self.max_power = 6000.0
+        self.max_pressure = 20.0
 
         self.running_params = RunningParams()
 
@@ -307,14 +311,69 @@ class LaserCuttingCopilotApp(ctk.CTk):
         lim_frame = ctk.CTkFrame(parent, fg_color="#05070f", corner_radius=10)
         lim_frame.pack(fill="x", padx=20, pady=10)
         
-        title = ctk.CTkLabel(lim_frame, text="设备硬件约束", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8")
-        title.pack(anchor="w", padx=10, pady=(8, 2))
+        title = ctk.CTkLabel(lim_frame, text="设备硬件约束 (回车生效)", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8")
+        title.pack(anchor="w", padx=10, pady=(8, 4))
         
-        p_limit = ctk.CTkLabel(lim_frame, text="最大功率: 6000 W", font=ctk.CTkFont(family="JetBrains Mono", size=11), text_color="#06b6d4")
-        p_limit.pack(anchor="w", padx=10, pady=2)
+        # Power limit entry
+        p_frame = ctk.CTkFrame(lim_frame, fg_color="transparent")
+        p_frame.pack(fill="x", padx=10, pady=2)
+        p_lbl = ctk.CTkLabel(p_frame, text="最大功率(W):", font=ctk.CTkFont(size=11), text_color="#94a3b8")
+        p_lbl.pack(side="left")
+        self.p_limit_ent = ctk.CTkEntry(p_frame, width=90, height=20, font=ctk.CTkFont(family="JetBrains Mono", size=11), fg_color="#131b32", border_color="#1e293b", text_color="#06b6d4", justify="right")
+        self.p_limit_ent.pack(side="right")
+        self.p_limit_ent.insert(0, f"{self.max_power:.0f}")
         
-        g_limit = ctk.CTkLabel(lim_frame, text="最大气压: 20 bar", font=ctk.CTkFont(family="JetBrains Mono", size=11), text_color="#06b6d4")
-        g_limit.pack(anchor="w", padx=10, pady=(2, 8))
+        # Gas pressure limit entry
+        g_frame = ctk.CTkFrame(lim_frame, fg_color="transparent")
+        g_frame.pack(fill="x", padx=10, pady=(2, 8))
+        g_lbl = ctk.CTkLabel(g_frame, text="最大气压(bar):", font=ctk.CTkFont(size=11), text_color="#94a3b8")
+        g_lbl.pack(side="left")
+        self.g_limit_ent = ctk.CTkEntry(g_frame, width=90, height=20, font=ctk.CTkFont(family="JetBrains Mono", size=11), fg_color="#131b32", border_color="#1e293b", text_color="#06b6d4", justify="right")
+        self.g_limit_ent.pack(side="right")
+        self.g_limit_ent.insert(0, f"{self.max_pressure:.1f}")
+
+        # Bind events
+        self.p_limit_ent.bind("<Return>", self.update_hardware_limits)
+        self.p_limit_ent.bind("<FocusOut>", self.update_hardware_limits)
+        self.g_limit_ent.bind("<Return>", self.update_hardware_limits)
+        self.g_limit_ent.bind("<FocusOut>", self.update_hardware_limits)
+
+    def update_hardware_limits(self, event=None):
+        try:
+            p_val = float(self.p_limit_ent.get().strip())
+            g_val = float(self.g_limit_ent.get().strip())
+            
+            if p_val <= 0 or g_val <= 0:
+                raise ValueError("必须大于 0")
+            
+            self.max_power = p_val
+            self.max_pressure = g_val
+            
+            # Update slider ranges dynamically
+            if hasattr(self, 'grp_p') and self.grp_p:
+                self.grp_p["slider"].configure(to=p_val)
+                curr_p = self.grp_p["slider"].get()
+                if curr_p > p_val:
+                    self.grp_p["slider"].set(p_val)
+                    self.on_power_slide(p_val)
+                    
+            if hasattr(self, 'grp_pr') and self.grp_pr:
+                self.grp_pr["slider"].configure(to=g_val)
+                curr_pr = self.grp_pr["slider"].get()
+                if curr_pr > g_val:
+                    self.grp_pr["slider"].set(g_val)
+                    self.on_pressure_slide(g_val)
+            
+            # Re-fetch recommendation based on new limits
+            if self.selected_material and self.selected_thickness:
+                self.auto_load_baseline_recipe()
+                
+        except ValueError:
+            # Revert entries
+            self.p_limit_ent.delete(0, "end")
+            self.p_limit_ent.insert(0, f"{self.max_power:.0f}")
+            self.g_limit_ent.delete(0, "end")
+            self.g_limit_ent.insert(0, f"{self.max_pressure:.1f}")
 
     def update_thickness_options(self, material):
         thicknesses = self.materials_map.get(material, [1.0, 2.0, 3.0])
@@ -406,7 +465,12 @@ class LaserCuttingCopilotApp(ctk.CTk):
 
     def auto_load_baseline_recipe(self):
         # 1. Fetch parameters (RAG recommendation + safety cappings)
-        rec = recommender.recommend_parameters(self.selected_material, self.selected_thickness)
+        rec = recommender.recommend_parameters(
+            self.selected_material, 
+            self.selected_thickness, 
+            max_machine_power=self.max_power, 
+            max_machine_pressure=self.max_pressure
+        )
         self.recommendation_data = rec
 
         # 2. Update decision log console with RAG reasoning
@@ -667,11 +731,11 @@ class LaserCuttingCopilotApp(ctk.CTk):
 
     def setup_parameter_widgets(self):
         # Power
-        self.grp_p = self.create_slider_row("🔥 激光功率 (W)", 500, 6000, self.on_power_slide, 0, 0, columnspan=2)
+        self.grp_p = self.create_slider_row("🔥 激光功率 (W)", 500, self.max_power, self.on_power_slide, 0, 0, columnspan=2)
         # Speed
         self.grp_s = self.create_slider_row("🚀 切割速度 (mm/min)", 100, 25000, self.on_speed_slide, 1, 0, columnspan=2)
         # Gas pressure
-        self.grp_pr = self.create_slider_row("💨 辅助气压 (bar)", 0.1, 20.0, self.on_pressure_slide, 2, 0, is_float=True, columnspan=2)
+        self.grp_pr = self.create_slider_row("💨 辅助气压 (bar)", 0.1, self.max_pressure, self.on_pressure_slide, 2, 0, is_float=True, columnspan=2)
         # Focus
         self.grp_f = self.create_slider_row("🎯 焦点位置 (mm)", -8.0, 8.0, self.on_focus_slide, 3, 0, is_float=True, columnspan=2)
 
