@@ -1,0 +1,15 @@
+{
+  "episode_id": "LC_CS30_AIR_L9_0005",
+  "cut_through": true,
+  "overall_quality": "acceptable",
+  "quality_score": 71.41,
+  "failure_case": "normal",
+  "kerf_width_top_mm": 1.047,
+  "kerf_width_bottom_mm": 0.788,
+  "taper_mm": 0.259,
+  "dross_height_max_mm": 0.485,
+  "dross_height_mean_mm": 0.252,
+  "roughness_Sa_um": 13.52,
+  "defect_area_mm2": 0.0,
+  "manual_comment": "Simulated cut is stable with acceptable kerf and dross."
+}

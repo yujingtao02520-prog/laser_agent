@@ -1,0 +1,57 @@
+{
+  "episode_id": "LC_CS30_AIR_L9_0005",
+  "failure_case": "normal",
+  "current_parameters": {
+    "power_kw": 54.0,
+    "speed_m_min": 0.9,
+    "air_pressure_mpa": 1.8,
+    "focus_mm": -6.0
+  },
+  "quality_observation": {
+    "quality_score": 71.41,
+    "overall_quality": "acceptable",
+    "dross_height_max_mm": 0.485,
+    "roughness_Sa_um": 13.52,
+    "kerf_width_top_mm": 1.047,
+    "taper_mm": 0.259
+  },
+  "recommended_changes": [
+    "repeat around current parameters",
+    "run small-range confirmation"
+  ],
+  "next_parameters": {
+    "power_kw": 54.0,
+    "speed_m_min": 0.9,
+    "air_pressure_mpa": 1.8,
+    "focus_mm": -6.0
+  },
+  "local_validation_plan": [
+    {
+      "power_kw": 54.0,
+      "speed_m_min": 0.9,
+      "air_pressure_mpa": 1.8,
+      "focus_mm": -6.0
+    },
+    {
+      "power_kw": 54.0,
+      "speed_m_min": 0.6,
+      "air_pressure_mpa": 1.8,
+      "focus_mm": -6.0
+    },
+    {
+      "power_kw": 54.0,
+      "speed_m_min": 1.2,
+      "air_pressure_mpa": 1.8,
+      "focus_mm": -6.0
+    },
+    {
+      "power_kw": 54.0,
+      "speed_m_min": 0.9,
+      "air_pressure_mpa": 1.5,
+      "focus_mm": -6.0
+    }
+  ],
+  "rationale": [
+    "The current episode is normal; next step is robustness confirmation."
+  ]
+}

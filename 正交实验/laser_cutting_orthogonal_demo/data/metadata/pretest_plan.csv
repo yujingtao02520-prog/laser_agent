@@ -1,0 +1,14 @@
+﻿episode_id,stage,material,thickness_mm,gas,power_kw,speed_m_min,air_pressure_mpa,focus_mm,nozzle_height_mm,nozzle_diameter_mm,path_type
+LC_CS30_AIR_PRE_SPEED_0001,pretest_speed_scan,carbon_steel,30,air,54,0.5,1.5,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_SPEED_0002,pretest_speed_scan,carbon_steel,30,air,54,0.7,1.5,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_SPEED_0003,pretest_speed_scan,carbon_steel,30,air,54,0.9,1.5,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_SPEED_0004,pretest_speed_scan,carbon_steel,30,air,54,1.1,1.5,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_SPEED_0005,pretest_speed_scan,carbon_steel,30,air,54,1.3,1.5,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_FOCUS_0001,pretest_focus_scan,carbon_steel,30,air,54,0.8,1.5,-6,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_FOCUS_0002,pretest_focus_scan,carbon_steel,30,air,54,0.8,1.5,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_FOCUS_0003,pretest_focus_scan,carbon_steel,30,air,54,0.8,1.5,-12,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_FOCUS_0004,pretest_focus_scan,carbon_steel,30,air,54,0.8,1.5,-15,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_PRESS_0001,pretest_pressure_scan,carbon_steel,30,air,54,0.8,1.2,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_PRESS_0002,pretest_pressure_scan,carbon_steel,30,air,54,0.8,1.5,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_PRESS_0003,pretest_pressure_scan,carbon_steel,30,air,54,0.8,1.8,-9,1.0,4.0,straight_line
+LC_CS30_AIR_PRE_PRESS_0004,pretest_pressure_scan,carbon_steel,30,air,54,0.8,2.0,-9,1.0,4.0,straight_line

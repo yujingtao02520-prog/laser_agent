@@ -1,0 +1,15 @@
+{
+  "episode_id": "LC_CS30_AIR_L9_0009",
+  "cut_through": false,
+  "overall_quality": "not_cut_through",
+  "quality_score": 11.92,
+  "failure_case": "incomplete_cut",
+  "kerf_width_top_mm": 1.018,
+  "kerf_width_bottom_mm": 0.729,
+  "taper_mm": 0.29,
+  "dross_height_max_mm": 1.775,
+  "dross_height_mean_mm": 1.034,
+  "roughness_Sa_um": 15.431,
+  "defect_area_mm2": 32.98,
+  "manual_comment": "Energy density is insufficient for full penetration."
+}

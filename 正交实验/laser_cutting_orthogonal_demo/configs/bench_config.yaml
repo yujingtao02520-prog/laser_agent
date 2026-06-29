@@ -1,0 +1,18 @@
+benches:
+  cs30_air_l9:
+    name: 30 mm carbon steel air L9 process bench
+    description: >
+      End-to-end process experiment bench for 30 mm carbon steel with air assist,
+      including pretest plan generation, L9 orthogonal plan, simulated quality
+      results, range analysis, main-effect figures, and Agent recommendation.
+    material: carbon_steel
+    thickness_mm: 30
+    assist_gas: air
+    plan: orthogonal_L9
+    scoring_metric: quality_score
+    target_score: 75
+    seed: 2026
+    recommendation_episode_strategy: first_failure
+    outputs:
+      summary_json: outputs/bench/cs30_air_l9/bench_summary.json
+      summary_md: outputs/bench/cs30_air_l9/bench_summary.md

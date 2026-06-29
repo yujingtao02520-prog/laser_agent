@@ -1,0 +1,56 @@
+{
+  "process_parameters": {
+    "episode_id": "LC_CS30_AIR_L9_0005",
+    "material": "carbon_steel",
+    "thickness_mm": 30,
+    "assist_gas": "air",
+    "laser_power_kw": 54.0,
+    "cutting_speed_m_min": 0.9,
+    "air_pressure_mpa": 1.8,
+    "focus_position_mm": -6.0,
+    "nozzle_height_mm": 1.0,
+    "nozzle_diameter_mm": 4.0,
+    "path_type": "straight_line",
+    "experiment_stage": "orthogonal_L9"
+  },
+  "quality_observation": {
+    "episode_id": "LC_CS30_AIR_L9_0005",
+    "cut_through": true,
+    "overall_quality": "acceptable",
+    "quality_score": 71.41,
+    "failure_case": "normal",
+    "kerf_width_top_mm": 1.047,
+    "kerf_width_bottom_mm": 0.788,
+    "taper_mm": 0.259,
+    "dross_height_max_mm": 0.485,
+    "dross_height_mean_mm": 0.252,
+    "roughness_Sa_um": 13.52,
+    "defect_area_mm2": 0.0,
+    "manual_comment": "Simulated cut is stable with acceptable kerf and dross."
+  },
+  "failure_case": [
+    "normal"
+  ],
+  "candidate_action_space": {
+    "power_kw": [
+      48,
+      54,
+      60
+    ],
+    "speed_m_min": [
+      0.6,
+      0.9,
+      1.2
+    ],
+    "air_pressure_mpa": [
+      1.2,
+      1.5,
+      1.8
+    ],
+    "focus_mm": [
+      -6,
+      -9,
+      -12
+    ]
+  }
+}
