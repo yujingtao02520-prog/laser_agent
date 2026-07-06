@@ -1,0 +1,17 @@
+[project]
+name = "laser-agent"
+version = "0.1.0"
+description = "Laser Cutting Copilot decision system"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "pydantic>=2.0.0",
+    "customtkinter>=5.2.0",
+    "matplotlib>=3.7.0",
+    "numpy>=1.24.0",
+]
+
+[tool.uv]
+package = false
