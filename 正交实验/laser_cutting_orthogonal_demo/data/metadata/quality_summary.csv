@@ -1,0 +1,10 @@
+﻿episode_id,stage,power_kw,speed_m_min,air_pressure_mpa,focus_mm,cut_through,failure_case,quality_score,dross_height_max_mm,roughness_Sa_um,kerf_width_top_mm,taper_mm
+LC_CS30_AIR_L9_0001,orthogonal_L9,48,0.6,1.2,-6,True,normal,67.72,0.819,13.882,1.084,0.243
+LC_CS30_AIR_L9_0002,orthogonal_L9,48,0.9,1.5,-9,True,normal,78.76,0.367,9.87,0.991,0.129
+LC_CS30_AIR_L9_0003,orthogonal_L9,48,1.2,1.8,-12,False,incomplete_cut,3.4,2.652,14.592,0.949,0.324
+LC_CS30_AIR_L9_0004,orthogonal_L9,54,0.6,1.5,-12,True,overburn,45.15,0.431,13.89,1.206,0.254
+LC_CS30_AIR_L9_0005,orthogonal_L9,54,0.9,1.8,-6,True,normal,71.41,0.485,13.52,1.047,0.259
+LC_CS30_AIR_L9_0006,orthogonal_L9,54,1.2,1.2,-9,False,incomplete_cut,11.76,2.359,11.791,0.942,0.22
+LC_CS30_AIR_L9_0007,orthogonal_L9,60,0.6,1.8,-9,True,overburn,45.26,0.284,13.524,1.318,0.183
+LC_CS30_AIR_L9_0008,orthogonal_L9,60,0.9,1.2,-12,True,normal,69.23,0.817,13.112,1.066,0.247
+LC_CS30_AIR_L9_0009,orthogonal_L9,60,1.2,1.5,-6,False,incomplete_cut,11.92,1.775,15.431,1.018,0.29

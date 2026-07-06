@@ -1,0 +1,14 @@
+{
+  "episode_id": "LC_CS30_AIR_L9_0003",
+  "material": "carbon_steel",
+  "thickness_mm": 30,
+  "assist_gas": "air",
+  "laser_power_kw": 48.0,
+  "cutting_speed_m_min": 1.2,
+  "air_pressure_mpa": 1.8,
+  "focus_position_mm": -12.0,
+  "nozzle_height_mm": 1.0,
+  "nozzle_diameter_mm": 4.0,
+  "path_type": "straight_line",
+  "experiment_stage": "orthogonal_L9"
+}

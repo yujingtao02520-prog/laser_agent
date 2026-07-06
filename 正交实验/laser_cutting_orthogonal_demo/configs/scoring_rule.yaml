@@ -1,0 +1,41 @@
+target_kerf_width_mm: 1.05
+
+coefficients:
+  alpha_dross: 8.0
+  beta_roughness: 1.4
+  gamma_kerf_error: 28.0
+  delta_taper: 22.0
+
+failure_caps:
+  incomplete_cut: 30
+  unstable_cut: 20
+  overburn: 60
+  dross: 70
+
+penalties:
+  incomplete_cut: 45
+  unstable_cut: 35
+  overburn: 22
+  overcut: 18
+  dross: 12
+  rough_surface: 10
+  normal: 0
+
+quality_metrics:
+  cut_through: whether the cut penetrates the full 30 mm plate
+  dross_height_max_mm: maximum dross height on the lower edge
+  dross_height_mean_mm: mean dross height on the lower edge
+  roughness_Sa_um: areal roughness of the cut surface
+  kerf_width_top_mm: kerf width at the top surface
+  kerf_width_bottom_mm: kerf width at the bottom surface
+  taper_mm: absolute top-bottom kerf width difference
+  defect_area_mm2: area of defects detected on the cut face
+  quality_score: benchmark score, 0 to 100
+  failure_case:
+    - normal
+    - incomplete_cut
+    - dross
+    - overburn
+    - overcut
+    - rough_surface
+    - unstable_cut

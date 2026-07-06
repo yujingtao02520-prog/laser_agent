@@ -1,0 +1,58 @@
+{
+  "episode_id": "LC_CS30_AIR_L9_0003",
+  "failure_case": "incomplete_cut",
+  "current_parameters": {
+    "power_kw": 48.0,
+    "speed_m_min": 1.2,
+    "air_pressure_mpa": 1.8,
+    "focus_mm": -12.0
+  },
+  "quality_observation": {
+    "quality_score": 3.4,
+    "overall_quality": "not_cut_through",
+    "dross_height_max_mm": 2.652,
+    "roughness_Sa_um": 14.592,
+    "kerf_width_top_mm": 0.949,
+    "taper_mm": 0.324
+  },
+  "recommended_changes": [
+    "increase power",
+    "reduce speed",
+    "move focus downward"
+  ],
+  "next_parameters": {
+    "power_kw": 54.0,
+    "speed_m_min": 0.9,
+    "air_pressure_mpa": 1.8,
+    "focus_mm": -12.0
+  },
+  "local_validation_plan": [
+    {
+      "power_kw": 54.0,
+      "speed_m_min": 0.9,
+      "air_pressure_mpa": 1.8,
+      "focus_mm": -12.0
+    },
+    {
+      "power_kw": 54.0,
+      "speed_m_min": 0.6,
+      "air_pressure_mpa": 1.8,
+      "focus_mm": -12.0
+    },
+    {
+      "power_kw": 54.0,
+      "speed_m_min": 1.2,
+      "air_pressure_mpa": 1.8,
+      "focus_mm": -12.0
+    },
+    {
+      "power_kw": 54.0,
+      "speed_m_min": 0.9,
+      "air_pressure_mpa": 1.5,
+      "focus_mm": -12.0
+    }
+  ],
+  "rationale": [
+    "Incomplete cutting indicates insufficient effective energy density."
+  ]
+}

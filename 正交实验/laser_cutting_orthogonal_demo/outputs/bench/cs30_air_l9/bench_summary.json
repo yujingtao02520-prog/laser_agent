@@ -1,0 +1,63 @@
+{
+  "bench_id": "cs30_air_l9",
+  "bench_name": "30 mm carbon steel air L9 process bench",
+  "description": "End-to-end process experiment bench for 30 mm carbon steel with air assist, including pretest plan generation, L9 orthogonal plan, simulated quality results, range analysis, main-effect figures, and Agent recommendation.",
+  "condition": {
+    "material": "carbon_steel",
+    "thickness_mm": 30,
+    "assist_gas": "air",
+    "plan": "orthogonal_L9"
+  },
+  "scoring_metric": "quality_score",
+  "target_score": 75.0,
+  "episode_count": 9,
+  "pass_rate": 0.111,
+  "failure_distribution": {
+    "normal": 4,
+    "incomplete_cut": 3,
+    "overburn": 2
+  },
+  "best_episode": {
+    "episode_id": "LC_CS30_AIR_L9_0002",
+    "quality_score": 78.76,
+    "failure_case": "normal",
+    "parameters": {
+      "power_kw": 48.0,
+      "speed_m_min": 0.9,
+      "air_pressure_mpa": 1.5,
+      "focus_mm": -9.0
+    }
+  },
+  "worst_episode": {
+    "episode_id": "LC_CS30_AIR_L9_0003",
+    "quality_score": 3.4,
+    "failure_case": "incomplete_cut"
+  },
+  "agent_recommendation": {
+    "episode_id": "LC_CS30_AIR_L9_0003",
+    "failure_case": "incomplete_cut",
+    "next_parameters": {
+      "power_kw": 54.0,
+      "speed_m_min": 0.9,
+      "air_pressure_mpa": 1.8,
+      "focus_mm": -12.0
+    },
+    "recommended_changes": [
+      "increase power",
+      "reduce speed",
+      "move focus downward"
+    ]
+  },
+  "artifacts": {
+    "pretest_plan": "data\\metadata\\pretest_plan.csv",
+    "orthogonal_plan": "data\\metadata\\orthogonal_plan_L9.csv",
+    "experiment_log": "data\\metadata\\experiment_log.csv",
+    "quality_summary": "data\\metadata\\quality_summary.csv",
+    "analysis_csv": "outputs\\reports\\orthogonal_analysis_result.csv",
+    "analysis_report": "outputs\\reports\\orthogonal_analysis_report.md",
+    "recommendation_json": "outputs\\reports\\agent_recommendation_LC_CS30_AIR_L9_0003.json",
+    "recommendation_md": "outputs\\reports\\agent_recommendation_LC_CS30_AIR_L9_0003.md",
+    "bench_summary_json": "outputs\\bench\\cs30_air_l9\\bench_summary.json",
+    "bench_summary_md": "outputs\\bench\\cs30_air_l9\\bench_summary.md"
+  }
+}

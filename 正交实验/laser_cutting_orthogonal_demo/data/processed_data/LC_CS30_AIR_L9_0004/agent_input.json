@@ -1,0 +1,56 @@
+{
+  "process_parameters": {
+    "episode_id": "LC_CS30_AIR_L9_0004",
+    "material": "carbon_steel",
+    "thickness_mm": 30,
+    "assist_gas": "air",
+    "laser_power_kw": 54.0,
+    "cutting_speed_m_min": 0.6,
+    "air_pressure_mpa": 1.5,
+    "focus_position_mm": -12.0,
+    "nozzle_height_mm": 1.0,
+    "nozzle_diameter_mm": 4.0,
+    "path_type": "straight_line",
+    "experiment_stage": "orthogonal_L9"
+  },
+  "quality_observation": {
+    "episode_id": "LC_CS30_AIR_L9_0004",
+    "cut_through": true,
+    "overall_quality": "poor",
+    "quality_score": 45.15,
+    "failure_case": "overburn",
+    "kerf_width_top_mm": 1.206,
+    "kerf_width_bottom_mm": 0.952,
+    "taper_mm": 0.254,
+    "dross_height_max_mm": 0.431,
+    "dross_height_mean_mm": 0.195,
+    "roughness_Sa_um": 13.89,
+    "defect_area_mm2": 0.0,
+    "manual_comment": "Energy input is excessive and heat affected symptoms are expected."
+  },
+  "failure_case": [
+    "overburn"
+  ],
+  "candidate_action_space": {
+    "power_kw": [
+      48,
+      54,
+      60
+    ],
+    "speed_m_min": [
+      0.6,
+      0.9,
+      1.2
+    ],
+    "air_pressure_mpa": [
+      1.2,
+      1.5,
+      1.8
+    ],
+    "focus_mm": [
+      -6,
+      -9,
+      -12
+    ]
+  }
+}
