@@ -187,7 +187,9 @@ async function deleteExperiment(episodeId) {
 async function handleNewRunSubmit(e) {
     e.preventDefault();
 
+    const episodeIdVal = document.getElementById('input-episode-id').value.trim();
     const data = {
+        episode_id: episodeIdVal ? episodeIdVal : null,
         power_kw: parseFloat(document.getElementById('input-power').value) * 0.6,
         speed_m_min: parseFloat(document.getElementById('input-speed').value),
         air_pressure_mpa: parseFloat(document.getElementById('input-pressure').value),
@@ -207,6 +209,9 @@ async function handleNewRunSubmit(e) {
 
         if (!res.ok) throw new Error('保存失败');
         const result = await res.json();
+        
+        // Clear custom ID input on success
+        document.getElementById('input-episode-id').value = '';
         
         // CRITICAL MEMORY FEATURE: Do NOT reset the form input values!
         // This keeps the values in fields so users can adjust and log next run easily.

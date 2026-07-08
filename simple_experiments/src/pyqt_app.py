@@ -367,6 +367,8 @@ class MainWindow(QMainWindow):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
+        self.episode_id_input = QLineEdit()
+        self.episode_id_input.setPlaceholderText("留空则自动生成名称/ID")
         self.power = make_spin(83.0, 0.0, 100.0, 1, 1.0)
         self.speed = make_spin(0.9, 0.1, 10.0, 2, 0.05)
         self.pressure = make_spin(1.5, 0.0, 100.0, 2, 0.05)
@@ -377,6 +379,7 @@ class MainWindow(QMainWindow):
         self.nozzle_height = make_spin(1.0, 0.0, 20.0, 2, 0.1)
         self.nozzle_diameter = make_spin(4.0, 0.1, 20.0, 2, 0.1)
 
+        form.addRow("试验名称/ID", self.episode_id_input)
         form.addRow("激光功率 (%)", self.power)
         form.addRow("切割速度 (m/min)", self.speed)
         form.addRow("辅助气压 (MPa)", self.pressure)
@@ -530,7 +533,9 @@ class MainWindow(QMainWindow):
         return holder
 
     def add_run(self):
+        eid = self.episode_id_input.text().strip()
         params = {
+            "episode_id": eid if eid else None,
             "stage": "manual_run",
             "material": self.material.text().strip() or "carbon_steel",
             "thickness_mm": self.thickness.value(),
@@ -545,6 +550,7 @@ class MainWindow(QMainWindow):
 
         try:
             episode_id = gui_db.add_run(params)
+            self.episode_id_input.clear()
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", str(exc))
             return
