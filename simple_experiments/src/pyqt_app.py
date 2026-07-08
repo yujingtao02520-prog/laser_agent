@@ -32,6 +32,9 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QTabWidget,
+    QScrollArea,
+    QFileDialog,
 )
 
 import gui_db
@@ -103,8 +106,9 @@ class QualityDialog(QDialog):
     def __init__(self, run: Dict[str, Any], parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.run = run
-        self.setWindowTitle(f"补充质量检测数据 - {run['episode_id']}")
-        self.setMinimumWidth(560)
+        self.setWindowTitle(f"录入检测数据与整理文件 - {run['episode_id']}")
+        self.setMinimumWidth(580)
+        self.setMinimumHeight(520)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -115,16 +119,27 @@ class QualityDialog(QDialog):
         power_val = run.get('power_kw')
         power_pct = float(power_val) / 0.6 if power_val is not None else None
         subtitle = QLabel(
-            f"{format_value(power_pct, 1)}% | "
-            f"{format_value(run.get('speed_m_min'))} m/min | "
-            f"{format_value(run.get('air_pressure_mpa'))} MPa | "
-            f"{format_value(run.get('focus_mm'))} mm"
+            f"功率: {format_value(power_pct, 1)}% | "
+            f"速度: {format_value(run.get('speed_m_min'))} m/min | "
+            f"气压: {format_value(run.get('air_pressure_mpa'))} MPa | "
+            f"焦点位置: {format_value(run.get('focus_mm'))} mm"
         )
         subtitle.setObjectName("mutedLabel")
         layout.addWidget(title)
         layout.addWidget(subtitle)
 
-        form = QFormLayout()
+        # Tab Widget
+        self.tabs = QTabWidget()
+
+        # Tab 1: Regular Quality Data
+        self.tab1 = QWidget()
+        tab1_layout = QVBoxLayout(self.tab1)
+        tab1_layout.setContentsMargins(10, 10, 10, 10)
+        
+        scroll1 = QScrollArea()
+        scroll1.setWidgetResizable(True)
+        scroll1_content = QWidget()
+        form = QFormLayout(scroll1_content)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(10)
@@ -153,7 +168,7 @@ class QualityDialog(QDialog):
         self.quality_score = self._line("quality_score", "留空则自动根据挂渣与粗糙度评分")
         self.comment = QTextEdit()
         self.comment.setPlaceholderText("切面外观、挂渣剥离难易度、检测备注等...")
-        self.comment.setFixedHeight(78)
+        self.comment.setFixedHeight(60)
         self.comment.setPlainText(run.get("manual_comment") or "")
 
         form.addRow("", self.cut_through)
@@ -167,7 +182,70 @@ class QualityDialog(QDialog):
         form.addRow("缺陷面积 (mm2)", self.defect_area)
         form.addRow("综合质量得分", self.quality_score)
         form.addRow("检测备注", self.comment)
-        layout.addLayout(form)
+        
+        scroll1.setWidget(scroll1_content)
+        tab1_layout.addWidget(scroll1)
+
+        # Tab 2: Point Cloud & Image Files
+        self.tab2 = QWidget()
+        tab2_layout = QVBoxLayout(self.tab2)
+        tab2_layout.setContentsMargins(10, 10, 10, 10)
+
+        scroll2 = QScrollArea()
+        scroll2.setWidgetResizable(True)
+        scroll2_content = QWidget()
+        files_form = QFormLayout(scroll2_content)
+        files_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        files_form.setHorizontalSpacing(14)
+        files_form.setVerticalSpacing(10)
+
+        self.file_fields = {}
+        file_definitions = [
+            ("point_cloud_front", "前切面点云"),
+            ("point_cloud_back", "后切面点云"),
+            ("point_cloud_left", "左切面点云"),
+            ("point_cloud_right", "右切面点云"),
+            ("point_cloud_dross", "挂渣底面点云"),
+            ("image_front", "前切面图像"),
+            ("image_back", "后切面图像"),
+            ("image_left", "左切面图像"),
+            ("image_right", "右切面图像"),
+            ("image_top", "上表面图像"),
+            ("image_bottom", "下表面图像"),
+        ]
+
+        for field_key, field_label in file_definitions:
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+
+            line_edit = QLineEdit()
+            line_edit.setReadOnly(True)
+            db_val = run.get(field_key)
+            if db_val:
+                line_edit.setText(db_val)
+                line_edit.setToolTip(db_val)
+
+            browse_btn = QPushButton("浏览...")
+            browse_btn.setObjectName("smallButton")
+            browse_btn.clicked.connect(lambda _, key=field_key, le=line_edit: self._browse_file(key, le))
+
+            row_layout.addWidget(line_edit, stretch=1)
+            row_layout.addWidget(browse_btn)
+
+            files_form.addRow(field_label, row_widget)
+            self.file_fields[field_key] = {
+                "line_edit": line_edit,
+                "selected_path": ""
+            }
+
+        scroll2.setWidget(scroll2_content)
+        tab2_layout.addWidget(scroll2)
+
+        self.tabs.addTab(self.tab1, "常规检测数据")
+        self.tabs.addTab(self.tab2, "点云与图像整理")
+        layout.addWidget(self.tabs)
 
         actions = QHBoxLayout()
         actions.addStretch()
@@ -188,6 +266,24 @@ class QualityDialog(QDialog):
         if not is_blank(value):
             field.setText(format_value(value))
         return field
+
+    def _browse_file(self, field_key: str, line_edit: QLineEdit):
+        filter_str = "All Files (*)"
+        if "cloud" in field_key:
+            filter_str = "Point Cloud Files (*.ply *.pcd *.xyz *.pts);;All Files (*)"
+        else:
+            filter_str = "Image Files (*.png *.jpg *.jpeg *.bmp *.tiff);;All Files (*)"
+            
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"选择 {field_key} 文件",
+            "",
+            filter_str
+        )
+        if file_path:
+            line_edit.setText(file_path)
+            line_edit.setToolTip(file_path)
+            self.file_fields[field_key]["selected_path"] = file_path
 
     def _accept_if_valid(self):
         try:
@@ -624,11 +720,17 @@ class MainWindow(QMainWindow):
 
         try:
             gui_db.update_run_quality(episode_id, dialog.payload())
+            
+            # Save any selected local files
+            for field_key, file_info in dialog.file_fields.items():
+                selected_path = file_info["selected_path"]
+                if selected_path:
+                    gui_db.save_local_inspection_file(episode_id, field_key, selected_path)
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", str(exc))
             return
 
-        self.analysis_output.setPlainText("检测数据已更新。请点击运行分析以更新极差分析结果。")
+        self.analysis_output.setPlainText("检测数据与文件已更新。请点击运行分析以更新极差分析结果。")
         self.refresh_data()
 
     def delete_run(self, episode_id: str):

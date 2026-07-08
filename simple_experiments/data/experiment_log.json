@@ -27,7 +27,18 @@
         "roughness_Sa_um": null,
         "defect_area_mm2": null,
         "manual_comment": "",
-        "quality_score": 30.0
+        "quality_score": 30.0,
+        "point_cloud_front": null,
+        "point_cloud_back": null,
+        "point_cloud_left": null,
+        "point_cloud_right": null,
+        "point_cloud_dross": null,
+        "image_front": null,
+        "image_back": null,
+        "image_left": null,
+        "image_right": null,
+        "image_top": null,
+        "image_bottom": null
     },
     {
         "episode_id": "SY-5-6-6-003",
@@ -57,7 +68,18 @@
         "roughness_Sa_um": null,
         "defect_area_mm2": null,
         "manual_comment": "",
-        "quality_score": 30.0
+        "quality_score": 30.0,
+        "point_cloud_front": null,
+        "point_cloud_back": null,
+        "point_cloud_left": null,
+        "point_cloud_right": null,
+        "point_cloud_dross": null,
+        "image_front": null,
+        "image_back": null,
+        "image_left": null,
+        "image_right": null,
+        "image_top": null,
+        "image_bottom": null
     },
     {
         "episode_id": "SY-5-6-6-002",
@@ -87,7 +109,18 @@
         "roughness_Sa_um": null,
         "defect_area_mm2": null,
         "manual_comment": "",
-        "quality_score": 30.0
+        "quality_score": 30.0,
+        "point_cloud_front": null,
+        "point_cloud_back": null,
+        "point_cloud_left": null,
+        "point_cloud_right": null,
+        "point_cloud_dross": null,
+        "image_front": null,
+        "image_back": null,
+        "image_left": null,
+        "image_right": null,
+        "image_top": null,
+        "image_bottom": null
     },
     {
         "episode_id": "SY-5-6-6-001",
@@ -117,6 +150,17 @@
         "roughness_Sa_um": null,
         "defect_area_mm2": null,
         "manual_comment": "",
-        "quality_score": 30.0
+        "quality_score": 30.0,
+        "point_cloud_front": null,
+        "point_cloud_back": null,
+        "point_cloud_left": null,
+        "point_cloud_right": null,
+        "point_cloud_dross": null,
+        "image_front": null,
+        "image_back": null,
+        "image_left": null,
+        "image_right": null,
+        "image_top": null,
+        "image_bottom": null
     }
 ]

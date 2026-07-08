@@ -191,58 +191,133 @@
                 <span id="modal-episode-id">LC_CS30_AIR_L9_0001</span>
                 <span id="modal-params-summary">54kW | 0.8m/min | 1.5MPa | -9mm</span>
             </div>
+            
+            <div class="modal-tabs">
+                <button type="button" class="modal-tab-btn active" id="btn-tab-data" onclick="switchModalTab('data')">常规检测数据</button>
+                <button type="button" class="modal-tab-btn" id="btn-tab-files" onclick="switchModalTab('files')">点云与图像整理</button>
+            </div>
+
             <form id="form-supplement-quality">
                 <input type="hidden" id="modal-hidden-episode-id">
-                <div class="form-grid">
-                    <div class="form-group col-span-2 flex-row">
-                        <label for="modal-cut-through" class="checkbox-label">
-                            <input type="checkbox" id="modal-cut-through" checked>
-                            <span>成功切透板材</span>
-                        </label>
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-failure">异常切割模式分类</label>
-                        <select id="modal-failure">
-                            <option value="normal">正常 (normal)</option>
-                            <option value="incomplete_cut">未切透 (incomplete_cut)</option>
-                            <option value="overburn">过烧 (overburn)</option>
-                            <option value="dross">过重挂渣 (dross)</option>
-                            <option value="unstable_cut">切割不稳定 (unstable_cut)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-dross-max">最大挂渣高度 (mm)</label>
-                        <input type="number" id="modal-dross-max" step="0.01" min="0" placeholder="例如 0.35">
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-dross-mean">平均挂渣高度 (mm)</label>
-                        <input type="number" id="modal-dross-mean" step="0.01" min="0" placeholder="例如 0.18">
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-roughness">表面粗糙度 Sa (μm)</label>
-                        <input type="number" id="modal-roughness" step="0.1" min="0" placeholder="例如 9.8">
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-kerf-top">上切缝宽度 (mm)</label>
-                        <input type="number" id="modal-kerf-top" step="0.01" min="0" placeholder="例如 1.05">
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-kerf-bottom">下切缝宽度 (mm)</label>
-                        <input type="number" id="modal-kerf-bottom" step="0.01" min="0" placeholder="例如 0.82">
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-defect-area">缺陷面积 (mm²)</label>
-                        <input type="number" id="modal-defect-area" step="0.1" min="0" placeholder="例如 0.0">
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-quality-score">综合质量得分 (0-100)</label>
-                        <input type="number" id="modal-quality-score" step="0.1" min="0" max="100" placeholder="留空则由系统自动打分">
-                    </div>
-                    <div class="form-group col-span-2">
-                        <label for="modal-comment">检测员备注 (Operator Comments)</label>
-                        <textarea id="modal-comment" rows="2" placeholder="描述试件外观、熔渣是否容易剥离、粗糙度变化趋势等..."></textarea>
+                
+                <!-- Tab 1: Data Content -->
+                <div id="modal-tab-data-content" class="modal-tab-content">
+                    <div class="form-grid">
+                        <div class="form-group col-span-2 flex-row">
+                            <label for="modal-cut-through" class="checkbox-label">
+                                <input type="checkbox" id="modal-cut-through" checked>
+                                <span>成功切透板材</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-failure">异常切割模式分类</label>
+                            <select id="modal-failure">
+                                <option value="normal">正常 (normal)</option>
+                                <option value="incomplete_cut">未切透 (incomplete_cut)</option>
+                                <option value="overburn">过烧 (overburn)</option>
+                                <option value="dross">过重挂渣 (dross)</option>
+                                <option value="unstable_cut">切割不稳定 (unstable_cut)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-dross-max">最大挂渣高度 (mm)</label>
+                            <input type="number" id="modal-dross-max" step="0.01" min="0" placeholder="例如 0.35">
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-dross-mean">平均挂渣高度 (mm)</label>
+                            <input type="number" id="modal-dross-mean" step="0.01" min="0" placeholder="例如 0.18">
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-roughness">表面粗糙度 Sa (μm)</label>
+                            <input type="number" id="modal-roughness" step="0.1" min="0" placeholder="例如 9.8">
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-kerf-top">上切缝宽度 (mm)</label>
+                            <input type="number" id="modal-kerf-top" step="0.01" min="0" placeholder="例如 1.05">
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-kerf-bottom">下切缝宽度 (mm)</label>
+                            <input type="number" id="modal-kerf-bottom" step="0.01" min="0" placeholder="例如 0.82">
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-defect-area">缺陷面积 (mm²)</label>
+                            <input type="number" id="modal-defect-area" step="0.1" min="0" placeholder="例如 0.0">
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-quality-score">综合质量得分 (0-100)</label>
+                            <input type="number" id="modal-quality-score" step="0.1" min="0" max="100" placeholder="留空则由系统自动打分">
+                        </div>
+                        <div class="form-group col-span-2">
+                            <label for="modal-comment">检测员备注 (Operator Comments)</label>
+                            <textarea id="modal-comment" rows="2" placeholder="描述试件外观、熔渣是否容易剥离、粗糙度变化趋势等..."></textarea>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Tab 2: Files Content -->
+                <div id="modal-tab-files-content" class="modal-tab-content hidden">
+                    <div style="margin-bottom: 1rem; font-size: 0.8rem; color: var(--text-muted);">
+                        请选择试件切面的点云与图像文件，保存后将自动重命名并归档至该试验的专用目录中。
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="file-pc-front">前切面点云 (.ply/.pcd)</label>
+                            <input type="file" id="file-pc-front" accept=".ply,.pcd,.xyz,.pts" class="form-control-file">
+                            <div class="file-status" id="status-pc-front">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-pc-back">后切面点云 (.ply/.pcd)</label>
+                            <input type="file" id="file-pc-back" accept=".ply,.pcd,.xyz,.pts" class="form-control-file">
+                            <div class="file-status" id="status-pc-back">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-pc-left">左切面点云 (.ply/.pcd)</label>
+                            <input type="file" id="file-pc-left" accept=".ply,.pcd,.xyz,.pts" class="form-control-file">
+                            <div class="file-status" id="status-pc-left">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-pc-right">右切面点云 (.ply/.pcd)</label>
+                            <input type="file" id="file-pc-right" accept=".ply,.pcd,.xyz,.pts" class="form-control-file">
+                            <div class="file-status" id="status-pc-right">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-pc-dross">挂渣底面点云 (.ply/.pcd)</label>
+                            <input type="file" id="file-pc-dross" accept=".ply,.pcd,.xyz,.pts" class="form-control-file">
+                            <div class="file-status" id="status-pc-dross">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-img-front">前切面图像 (.jpg/.png)</label>
+                            <input type="file" id="file-img-front" accept="image/*" class="form-control-file">
+                            <div class="file-status" id="status-img-front">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-img-back">后切面图像 (.jpg/.png)</label>
+                            <input type="file" id="file-img-back" accept="image/*" class="form-control-file">
+                            <div class="file-status" id="status-img-back">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-img-left">左切面图像 (.jpg/.png)</label>
+                            <input type="file" id="file-img-left" accept="image/*" class="form-control-file">
+                            <div class="file-status" id="status-img-left">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-img-right">右切面图像 (.jpg/.png)</label>
+                            <input type="file" id="file-img-right" accept="image/*" class="form-control-file">
+                            <div class="file-status" id="status-img-right">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-img-top">上表面图像 (.jpg/.png)</label>
+                            <input type="file" id="file-img-top" accept="image/*" class="form-control-file">
+                            <div class="file-status" id="status-img-top">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-img-bottom">下表面图像 (.jpg/.png)</label>
+                            <input type="file" id="file-img-bottom" accept="image/*" class="form-control-file">
+                            <div class="file-status" id="status-img-bottom">未归档</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary-outline" onclick="closeQualityModal()">取消</button>
                     <button type="submit" class="btn btn-secondary">保存检测数据</button>

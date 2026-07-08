@@ -751,3 +751,65 @@ textarea:focus {
     font-size: 0.8rem !important;
     border-radius: 6px !important;
 }
+
+.modal-tabs {
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--card-border);
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.25rem;
+}
+
+.modal-tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.9rem;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+    font-weight: 600;
+}
+
+.modal-tab-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.modal-tab-btn.active {
+    color: #38bdf8;
+    background: rgba(58, 134, 255, 0.12);
+    border: 1px solid rgba(58, 134, 255, 0.25);
+}
+
+.modal-tab-content.hidden {
+    display: none;
+}
+
+.form-control-file {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px dashed var(--card-border);
+    padding: 0.5rem;
+    border-radius: 6px;
+    color: var(--text-main);
+    font-size: 0.8rem;
+    cursor: pointer;
+    width: 100%;
+}
+
+.file-status {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+    display: inline-block;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.file-status.uploaded {
+    color: #2ec4b6;
+    background: rgba(46, 196, 182, 0.1);
+}

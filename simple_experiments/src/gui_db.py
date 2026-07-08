@@ -45,9 +45,32 @@ def init_db():
             roughness_Sa_um REAL,
             defect_area_mm2 REAL,
             manual_comment TEXT,
-            quality_score REAL
+            quality_score REAL,
+            point_cloud_front TEXT,
+            point_cloud_back TEXT,
+            point_cloud_left TEXT,
+            point_cloud_right TEXT,
+            point_cloud_dross TEXT,
+            image_front TEXT,
+            image_back TEXT,
+            image_left TEXT,
+            image_right TEXT,
+            image_top TEXT,
+            image_bottom TEXT
         );
     """)
+    
+    # Run migration for existing databases to add new columns if they do not exist
+    for col_name in [
+        "point_cloud_front", "point_cloud_back", "point_cloud_left", "point_cloud_right", "point_cloud_dross",
+        "image_front", "image_back", "image_left", "image_right", "image_top", "image_bottom"
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE experiment_runs ADD COLUMN {col_name} TEXT;")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore
+            pass
+            
     conn.commit()
     
     # Check if empty, and import from the original experiment_log.csv if it exists
@@ -271,7 +294,7 @@ def update_run_quality(episode_id: str, quality: Dict[str, Any]):
     conn.commit()
     conn.close()
     
-    sync_to_csv()
+    sync_data_to_files()
 
 def delete_run(episode_id: str) -> bool:
     conn = sqlite3.connect(DB_FILE)
@@ -354,6 +377,39 @@ def get_last_run_parameters() -> Optional[Dict[str, Any]]:
     if row:
         return dict(row)
     return None
+
+INSPECTION_DIR = os.path.join(DB_DIR, "inspections")
+
+def save_local_inspection_file(episode_id: str, field_name: str, src_path: str) -> str:
+    """Copies a local file to the structured inspections folder and updates DB with relative path"""
+    if not src_path or not os.path.exists(src_path):
+        return ""
+        
+    dest_dir = os.path.join(INSPECTION_DIR, episode_id)
+    os.makedirs(dest_dir, exist_ok=True)
+    
+    ext = os.path.splitext(src_path)[1]
+    dest_filename = f"{field_name}{ext}"
+    dest_path = os.path.join(dest_dir, dest_filename)
+    
+    import shutil
+    try:
+        shutil.copy2(src_path, dest_path)
+    except Exception as e:
+        print(f"[DB] Error copying file {src_path}: {e}")
+        return ""
+    
+    # Update SQLite database with relative path
+    rel_path = f"data/inspections/{episode_id}/{dest_filename}"
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(f"UPDATE experiment_runs SET {field_name} = ? WHERE episode_id = ?;", (rel_path, episode_id))
+    conn.commit()
+    conn.close()
+    
+    sync_data_to_files()
+    return rel_path
 
 # Initialize DB on load
 init_db()

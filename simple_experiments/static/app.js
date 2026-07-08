@@ -226,10 +226,33 @@ async function handleNewRunSubmit(e) {
     }
 }
 
+// Switch modal tabs between 'data' and 'files'
+function switchModalTab(tab) {
+    const btnData = document.getElementById('btn-tab-data');
+    const btnFiles = document.getElementById('btn-tab-files');
+    const contentData = document.getElementById('modal-tab-data-content');
+    const contentFiles = document.getElementById('modal-tab-files-content');
+    
+    if (tab === 'data') {
+        btnData.classList.add('active');
+        btnFiles.classList.remove('active');
+        contentData.classList.remove('hidden');
+        contentFiles.classList.add('hidden');
+    } else {
+        btnData.classList.remove('active');
+        btnFiles.classList.add('active');
+        contentData.classList.add('hidden');
+        contentFiles.classList.remove('hidden');
+    }
+}
+
 // Open modal to edit quality parameters
 function openSupplementModal(episodeId) {
     const run = allExperiments.find(r => r.episode_id === episodeId);
     if (!run) return;
+
+    // Reset active tab to 'data'
+    switchModalTab('data');
 
     document.getElementById('modal-episode-id').textContent = run.episode_id;
     document.getElementById('modal-hidden-episode-id').value = run.episode_id;
@@ -247,6 +270,42 @@ function openSupplementModal(episodeId) {
     document.getElementById('modal-defect-area').value = run.defect_area_mm2 !== null ? run.defect_area_mm2 : '';
     document.getElementById('modal-quality-score').value = run.quality_score !== null ? run.quality_score : '';
     document.getElementById('modal-comment').value = run.manual_comment || '';
+
+    // Reset file picker inputs
+    const fileInputs = [
+        'file-pc-front', 'file-pc-back', 'file-pc-left', 'file-pc-right', 'file-pc-dross',
+        'file-img-front', 'file-img-back', 'file-img-left', 'file-img-right', 'file-img-top', 'file-img-bottom'
+    ];
+    fileInputs.forEach(id => {
+        document.getElementById(id).value = '';
+    });
+
+    // Populate file status labels
+    const fileFieldsMapping = {
+        'status-pc-front': run.point_cloud_front,
+        'status-pc-back': run.point_cloud_back,
+        'status-pc-left': run.point_cloud_left,
+        'status-pc-right': run.point_cloud_right,
+        'status-pc-dross': run.point_cloud_dross,
+        'status-img-front': run.image_front,
+        'status-img-back': run.image_back,
+        'status-img-left': run.image_left,
+        'status-img-right': run.image_right,
+        'status-img-top': run.image_top,
+        'status-img-bottom': run.image_bottom
+    };
+
+    Object.entries(fileFieldsMapping).forEach(([statusId, dbVal]) => {
+        const el = document.getElementById(statusId);
+        if (dbVal) {
+            const filename = dbVal.split('/').pop();
+            el.textContent = `已归档: ${filename}`;
+            el.classList.add('uploaded');
+        } else {
+            el.textContent = '未归档';
+            el.classList.remove('uploaded');
+        }
+    });
 
     // Show modal
     document.getElementById('quality-modal').classList.remove('hidden');
@@ -275,6 +334,7 @@ async function handleSupplementQualitySubmit(e) {
     };
 
     try {
+        // 1. Save quality metrics data
         const res = await fetch(`/api/experiments/${episodeId}/quality`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -283,10 +343,43 @@ async function handleSupplementQualitySubmit(e) {
 
         if (!res.ok) throw new Error('保存检测数据失败');
         
+        // 2. Upload any selected files
+        const fileFieldsMapping = {
+            'point_cloud_front': document.getElementById('file-pc-front').files[0],
+            'point_cloud_back': document.getElementById('file-pc-back').files[0],
+            'point_cloud_left': document.getElementById('file-pc-left').files[0],
+            'point_cloud_right': document.getElementById('file-pc-right').files[0],
+            'point_cloud_dross': document.getElementById('file-pc-dross').files[0],
+            'image_front': document.getElementById('file-img-front').files[0],
+            'image_back': document.getElementById('file-img-back').files[0],
+            'image_left': document.getElementById('file-img-left').files[0],
+            'image_right': document.getElementById('file-img-right').files[0],
+            'image_top': document.getElementById('file-img-top').files[0],
+            'image_bottom': document.getElementById('file-img-bottom').files[0]
+        };
+
+        const formData = new FormData();
+        let hasFilesToUpload = false;
+
+        Object.entries(fileFieldsMapping).forEach(([key, fileObj]) => {
+            if (fileObj) {
+                formData.append(key, fileObj);
+                hasFilesToUpload = true;
+            }
+        });
+
+        if (hasFilesToUpload) {
+            const uploadRes = await fetch(`/api/experiments/${episodeId}/files`, {
+                method: 'POST',
+                body: formData
+            });
+            if (!uploadRes.ok) throw new Error('检测文件归档上传失败');
+        }
+        
         closeQualityModal();
         await loadExperiments();
     } catch (err) {
-        alert('保存检测数据出错: ' + err.message);
+        alert('保存检测数据及文件出错: ' + err.message);
     }
 }
 

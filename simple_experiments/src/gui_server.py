@@ -2,7 +2,7 @@ import os
 import sys
 import webbrowser
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -130,6 +130,74 @@ def update_quality(episode_id: str, quality: QualityInspectionUpdate):
         return {"status": "success", "episode_id": episode_id}
     except HTTPException as he:
         raise he
+@app.post("/api/experiments/{episode_id}/files")
+async def upload_inspection_files(
+    episode_id: str,
+    point_cloud_front: Optional[UploadFile] = None,
+    point_cloud_back: Optional[UploadFile] = None,
+    point_cloud_left: Optional[UploadFile] = None,
+    point_cloud_right: Optional[UploadFile] = None,
+    point_cloud_dross: Optional[UploadFile] = None,
+    image_front: Optional[UploadFile] = None,
+    image_back: Optional[UploadFile] = None,
+    image_left: Optional[UploadFile] = None,
+    image_right: Optional[UploadFile] = None,
+    image_top: Optional[UploadFile] = None,
+    image_bottom: Optional[UploadFile] = None
+):
+    try:
+        # Check if episode exists
+        runs = gui_db.get_all_runs()
+        if not any(r['episode_id'] == episode_id for r in runs):
+            raise HTTPException(status_code=404, detail=f"Episode {episode_id} not found")
+            
+        import shutil
+        import sqlite3
+        
+        dest_dir = os.path.join(gui_db.INSPECTION_DIR, episode_id)
+        os.makedirs(dest_dir, exist_ok=True)
+        
+        file_fields = {
+            "point_cloud_front": point_cloud_front,
+            "point_cloud_back": point_cloud_back,
+            "point_cloud_left": point_cloud_left,
+            "point_cloud_right": point_cloud_right,
+            "point_cloud_dross": point_cloud_dross,
+            "image_front": image_front,
+            "image_back": image_back,
+            "image_left": image_left,
+            "image_right": image_right,
+            "image_top": image_top,
+            "image_bottom": image_bottom
+        }
+        
+        updated_paths = {}
+        
+        for field_name, upload_file in file_fields.items():
+            if upload_file is not None and upload_file.filename:
+                ext = os.path.splitext(upload_file.filename)[1]
+                dest_filename = f"{field_name}{ext}"
+                dest_path = os.path.join(dest_dir, dest_filename)
+                
+                # Write file stream
+                with open(dest_path, "wb") as f:
+                    shutil.copyfileobj(upload_file.file, f)
+                    
+                rel_path = f"data/inspections/{episode_id}/{dest_filename}"
+                updated_paths[field_name] = rel_path
+                
+        if updated_paths:
+            # Update database
+            conn = sqlite3.connect(gui_db.DB_FILE)
+            cursor = conn.cursor()
+            for field_name, rel_path in updated_paths.items():
+                cursor.execute(f"UPDATE experiment_runs SET {field_name} = ? WHERE episode_id = ?;", (rel_path, episode_id))
+            conn.commit()
+            conn.close()
+            
+            gui_db.sync_data_to_files()
+            
+        return {"status": "success", "updated_fields": list(updated_paths.keys())}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
