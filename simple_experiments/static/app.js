@@ -72,9 +72,14 @@ function renderTable() {
             <td>${failBadge}</td>
             <td><strong>${scoreText}</strong></td>
             <td>
-                <button class="btn btn-secondary-outline btn-sm" onclick="openSupplementModal('${run.episode_id}')">
-                    <i class="fa-solid fa-edit"></i> Supplement Quality
-                </button>
+                <div class="action-buttons">
+                    <button class="btn btn-secondary-outline btn-sm" onclick="openSupplementModal('${run.episode_id}')">
+                        <i class="fa-solid fa-edit"></i> Supplement Quality
+                    </button>
+                    <button class="btn btn-danger-outline btn-sm" onclick="deleteExperiment('${run.episode_id}')">
+                        <i class="fa-solid fa-trash"></i> Delete
+                    </button>
+                </div>
             </td>
         `;
         tbody.appendChild(tr);
@@ -208,6 +213,27 @@ async function handleSupplementQualitySubmit(e) {
         await loadExperiments();
     } catch (err) {
         alert('Error saving inspection data: ' + err.message);
+    }
+}
+
+async function deleteExperiment(episodeId) {
+    const confirmed = confirm(`Delete experiment ${episodeId}? This will remove it from the local database and CSV log.`);
+    if (!confirmed) return;
+
+    try {
+        const res = await fetch(`/api/experiments/${encodeURIComponent(episodeId)}`, {
+            method: 'DELETE'
+        });
+
+        if (!res.ok) throw new Error('Failed to delete experiment');
+
+        if (analysisData) {
+            analysisData = null;
+            closeAnalysis();
+        }
+        await loadExperiments();
+    } catch (err) {
+        alert('Error deleting experiment: ' + err.message);
     }
 }
 

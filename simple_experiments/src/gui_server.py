@@ -69,6 +69,18 @@ def log_experiment(params: NewExperimentParams):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/experiments/{episode_id}")
+def delete_experiment(episode_id: str):
+    try:
+        deleted = gui_db.delete_run(episode_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_id} not found")
+        return {"status": "success", "episode_id": episode_id}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.put("/api/experiments/{episode_id}/quality")
 def update_quality(episode_id: str, quality: QualityInspectionUpdate):
     try:

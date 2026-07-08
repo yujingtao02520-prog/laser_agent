@@ -200,6 +200,22 @@ body {
     background: rgba(131, 56, 236, 0.1);
 }
 
+.btn-danger-outline {
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.75);
+    color: #fecaca;
+}
+
+.btn-danger-outline:hover {
+    background: rgba(239, 68, 68, 0.12);
+    color: #fff;
+}
+
+.btn-sm {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.78rem;
+}
+
 .btn-text {
     background: transparent;
     color: var(--text-muted);
@@ -449,6 +465,12 @@ textarea:focus {
 
 .data-table tbody tr:hover {
     background: rgba(255, 255, 255, 0.02);
+}
+
+.action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .badge {

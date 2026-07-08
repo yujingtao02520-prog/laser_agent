@@ -247,5 +247,20 @@ def update_run_quality(episode_id: str, quality: Dict[str, Any]):
     
     sync_to_csv()
 
+def delete_run(episode_id: str) -> bool:
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute("DELETE FROM experiment_runs WHERE episode_id = ?;", (episode_id,))
+    deleted = cursor.rowcount > 0
+    
+    conn.commit()
+    conn.close()
+    
+    if deleted:
+        sync_to_csv()
+        
+    return deleted
+
 # Initialize DB on load
 init_db()
