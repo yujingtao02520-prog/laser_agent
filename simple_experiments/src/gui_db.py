@@ -1,0 +1,251 @@
+import os
+import sqlite3
+import pandas as pd
+from typing import List, Dict, Any, Optional
+
+DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+DB_FILE = os.path.join(DB_DIR, "orthogonal_experiments.db")
+CSV_FILE = os.path.join(DB_DIR, "experiment_log.csv")
+SOURCE_CSV_FILE = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "正交实验demo", "data", "metadata", "experiment_log.csv"))
+
+def init_db():
+    if not os.path.exists(DB_DIR):
+        os.makedirs(DB_DIR, exist_ok=True)
+        
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS experiment_runs (
+            episode_id TEXT PRIMARY KEY,
+            stage TEXT,
+            material TEXT,
+            thickness_mm REAL,
+            gas TEXT,
+            power_kw REAL,
+            speed_m_min REAL,
+            air_pressure_mpa REAL,
+            focus_mm REAL,
+            A_level INTEGER,
+            B_level INTEGER,
+            C_level INTEGER,
+            D_level INTEGER,
+            nozzle_height_mm REAL,
+            nozzle_diameter_mm REAL,
+            path_type TEXT,
+            energy_index REAL,
+            cut_through INTEGER,
+            failure_case TEXT,
+            kerf_width_top_mm REAL,
+            kerf_width_bottom_mm REAL,
+            taper_mm REAL,
+            dross_height_max_mm REAL,
+            dross_height_mean_mm REAL,
+            roughness_Sa_um REAL,
+            defect_area_mm2 REAL,
+            manual_comment TEXT,
+            quality_score REAL
+        );
+    """)
+    conn.commit()
+    
+    # Check if empty, and import from the original experiment_log.csv if it exists
+    cursor.execute("SELECT COUNT(*) FROM experiment_runs;")
+    count = cursor.fetchone()[0]
+    
+    if count == 0:
+        src_path = SOURCE_CSV_FILE
+        # If original demo is not found, try to see if there's any local CSV
+        if not os.path.exists(src_path):
+            src_path = os.path.join(DB_DIR, "experiment_log.csv")
+            
+        if os.path.exists(src_path):
+            print(f"[DB] Importing seed data from {src_path}...")
+            try:
+                df = pd.read_csv(src_path)
+                # Handle possible NaN/null values in pandas
+                df = df.where(pd.notnull(df), None)
+                
+                for _, row in df.iterrows():
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO experiment_runs (
+                            episode_id, stage, material, thickness_mm, gas, power_kw, speed_m_min,
+                            air_pressure_mpa, focus_mm, A_level, B_level, C_level, D_level,
+                            nozzle_height_mm, nozzle_diameter_mm, path_type, energy_index,
+                            cut_through, failure_case, kerf_width_top_mm, kerf_width_bottom_mm,
+                            taper_mm, dross_height_max_mm, dross_height_mean_mm, roughness_Sa_um,
+                            defect_area_mm2, manual_comment, quality_score
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """, (
+                        row['episode_id'], row['stage'], row['material'], row['thickness_mm'],
+                        row['gas'], row['power_kw'], row['speed_m_min'], row['air_pressure_mpa'],
+                        row['focus_mm'], row['A_level'], row['B_level'], row['C_level'], row['D_level'],
+                        row['nozzle_height_mm'], row['nozzle_diameter_mm'], row['path_type'], row['energy_index'],
+                        1 if row['cut_through'] is True or row['cut_through'] == 1 or str(row['cut_through']).lower() == 'true' else 0,
+                        row['failure_case'], row['kerf_width_top_mm'], row['kerf_width_bottom_mm'],
+                        row['taper_mm'], row['dross_height_max_mm'], row['dross_height_mean_mm'], row['roughness_Sa_um'],
+                        row['defect_area_mm2'], row['manual_comment'], row['quality_score']
+                    ))
+                conn.commit()
+                print(f"[DB] Successfully imported {len(df)} records.")
+            except Exception as e:
+                print(f"[DB] Error importing initial CSV: {e}")
+                
+    conn.close()
+    # Always sync to output folder CSV on init to guarantee consistency
+    sync_to_csv()
+
+def sync_to_csv():
+    """Syncs the database contents back to experiment_log.csv"""
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT * FROM experiment_runs", conn)
+    conn.close()
+    
+    # Convert cut_through from 1/0 to True/False for CSV compatibility
+    if not df.empty and 'cut_through' in df.columns:
+        df['cut_through'] = df['cut_through'].apply(lambda x: True if x == 1 else False)
+        
+    df.to_csv(CSV_FILE, index=False)
+    print(f"[DB] Synced SQLite database to {CSV_FILE}")
+
+def get_all_runs() -> List[Dict[str, Any]]:
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM experiment_runs ORDER BY episode_id DESC;")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    runs = []
+    for row in rows:
+        run_dict = dict(row)
+        run_dict['cut_through'] = bool(run_dict['cut_through'])
+        runs.append(run_dict)
+    return runs
+
+def add_run(params: Dict[str, Any]) -> str:
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Auto generate episode_id if not present
+    episode_id = params.get('episode_id')
+    if not episode_id:
+        cursor.execute("SELECT episode_id FROM experiment_runs WHERE episode_id LIKE 'LC_CS30_AIR_L9_%' ORDER BY episode_id DESC LIMIT 1;")
+        last_row = cursor.fetchone()
+        if last_row:
+            last_id = last_row[0]
+            try:
+                num = int(last_id.split('_')[-1])
+                new_num = num + 1
+            except Exception:
+                new_num = 10
+            episode_id = f"LC_CS30_AIR_L9_{new_num:04d}"
+        else:
+            episode_id = "LC_CS30_AIR_L9_0010"
+            
+    # Calculate energy index: Power / Speed (kW / m/min)
+    power = float(params.get('power_kw', 54))
+    speed = float(params.get('speed_m_min', 0.8))
+    energy_index = round(power / speed, 3) if speed > 0 else 0.0
+    
+    cursor.execute("""
+        INSERT OR REPLACE INTO experiment_runs (
+            episode_id, stage, material, thickness_mm, gas, power_kw, speed_m_min,
+            air_pressure_mpa, focus_mm, A_level, B_level, C_level, D_level,
+            nozzle_height_mm, nozzle_diameter_mm, path_type, energy_index,
+            cut_through, failure_case, kerf_width_top_mm, kerf_width_bottom_mm,
+            taper_mm, dross_height_max_mm, dross_height_mean_mm, roughness_Sa_um,
+            defect_area_mm2, manual_comment, quality_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """, (
+        episode_id,
+        params.get('stage', 'manual_run'),
+        params.get('material', 'carbon_steel'),
+        float(params.get('thickness_mm', 30)),
+        params.get('gas', 'air'),
+        power,
+        speed,
+        float(params.get('air_pressure_mpa', 1.5)),
+        float(params.get('focus_mm', -9)),
+        params.get('A_level'),
+        params.get('B_level'),
+        params.get('C_level'),
+        params.get('D_level'),
+        float(params.get('nozzle_height_mm', 1.0)),
+        float(params.get('nozzle_diameter_mm', 4.0)),
+        params.get('path_type', 'straight_line'),
+        energy_index,
+        1 if params.get('cut_through') else 0,
+        params.get('failure_case', 'normal'),
+        params.get('kerf_width_top_mm'),
+        params.get('kerf_width_bottom_mm'),
+        params.get('taper_mm'),
+        params.get('dross_height_max_mm'),
+        params.get('dross_height_mean_mm'),
+        params.get('roughness_Sa_um'),
+        params.get('defect_area_mm2'),
+        params.get('manual_comment', ''),
+        params.get('quality_score')
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    sync_to_csv()
+    return episode_id
+
+def update_run_quality(episode_id: str, quality: Dict[str, Any]):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Calculate score if not provided
+    cut_through = quality.get('cut_through', True)
+    score = quality.get('quality_score')
+    
+    if score is None:
+        # Standard default scoring logic if user doesn't input one
+        if not cut_through:
+            score = 30.0
+        else:
+            # simple formula
+            dross = float(quality.get('dross_height_max_mm', 0.0) or 0.0)
+            roughness = float(quality.get('roughness_Sa_um', 0.0) or 0.0)
+            score = 100.0 - (dross * 15.0) - (roughness * 2.0)
+            score = max(0.0, min(100.0, score))
+            
+    cursor.execute("""
+        UPDATE experiment_runs SET
+            cut_through = ?,
+            failure_case = ?,
+            kerf_width_top_mm = ?,
+            kerf_width_bottom_mm = ?,
+            taper_mm = ?,
+            dross_height_max_mm = ?,
+            dross_height_mean_mm = ?,
+            roughness_Sa_um = ?,
+            defect_area_mm2 = ?,
+            manual_comment = ?,
+            quality_score = ?
+        WHERE episode_id = ?;
+    """, (
+        1 if cut_through else 0,
+        quality.get('failure_case', 'normal'),
+        quality.get('kerf_width_top_mm'),
+        quality.get('kerf_width_bottom_mm'),
+        quality.get('taper_mm'),
+        quality.get('dross_height_max_mm'),
+        quality.get('dross_height_mean_mm'),
+        quality.get('roughness_Sa_um'),
+        quality.get('defect_area_mm2'),
+        quality.get('manual_comment', ''),
+        score,
+        episode_id
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    sync_to_csv()
+
+# Initialize DB on load
+init_db()
