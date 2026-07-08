@@ -12,7 +12,7 @@ htmlcov/
 .idea/
 .vscode/
 *.log
-backend/llm_config.json
+agent_L1/backend/llm_config.json
 *.local
-data/LaserProcessDB.db
+agent_L1/data/LaserProcessDB.db
 *.bak
