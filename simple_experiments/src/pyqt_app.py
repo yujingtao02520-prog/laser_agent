@@ -112,8 +112,10 @@ class QualityDialog(QDialog):
 
         title = QLabel(f"Inspection Data: {run['episode_id']}")
         title.setObjectName("dialogTitle")
+        power_val = run.get('power_kw')
+        power_pct = float(power_val) / 0.6 if power_val is not None else None
         subtitle = QLabel(
-            f"{format_value(run.get('power_kw'))} kW | "
+            f"{format_value(power_pct, 1)}% | "
             f"{format_value(run.get('speed_m_min'))} m/min | "
             f"{format_value(run.get('air_pressure_mpa'))} MPa | "
             f"{format_value(run.get('focus_mm'))} mm"
@@ -268,7 +270,7 @@ class MainWindow(QMainWindow):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
-        self.power = make_spin(54.0, 10.0, 100.0, 1, 0.5)
+        self.power = make_spin(83.0, 0.0, 100.0, 1, 1.0)
         self.speed = make_spin(0.9, 0.1, 10.0, 2, 0.05)
         self.pressure = make_spin(1.5, 0.1, 5.0, 2, 0.05)
         self.focus = make_spin(-9.0, -30.0, 10.0, 1, 0.5)
@@ -278,7 +280,7 @@ class MainWindow(QMainWindow):
         self.nozzle_height = make_spin(1.0, 0.0, 20.0, 2, 0.1)
         self.nozzle_diameter = make_spin(4.0, 0.1, 20.0, 2, 0.1)
 
-        form.addRow("Laser power (kW)", self.power)
+        form.addRow("Laser power (%)", self.power)
         form.addRow("Cut speed (m/min)", self.speed)
         form.addRow("Gas pressure (MPa)", self.pressure)
         form.addRow("Focus (mm)", self.focus)
@@ -380,7 +382,7 @@ class MainWindow(QMainWindow):
         for row_idx, run in enumerate(self.runs):
             values = [
                 run.get("episode_id"),
-                f"{format_value(run.get('power_kw'))} kW",
+                f"{format_value(float(run.get('power_kw')) / 0.6 if run.get('power_kw') is not None else None, 1)}%",
                 f"{format_value(run.get('speed_m_min'))} m/min",
                 f"{format_value(run.get('air_pressure_mpa'))} MPa",
                 f"{format_value(run.get('focus_mm'))} mm",
@@ -426,7 +428,7 @@ class MainWindow(QMainWindow):
             "material": self.material.text().strip() or "carbon_steel",
             "thickness_mm": self.thickness.value(),
             "gas": self.gas.text().strip() or "air",
-            "power_kw": self.power.value(),
+            "power_kw": self.power.value() * 0.6,
             "speed_m_min": self.speed.value(),
             "air_pressure_mpa": self.pressure.value(),
             "focus_mm": self.focus.value(),
@@ -514,7 +516,7 @@ class MainWindow(QMainWindow):
             "Best observed trial",
             (
                 f"  {best['episode_id']}: score {float(best['quality_score']):.1f}, "
-                f"{float(best['power_kw']):.1f} kW, {float(best['speed_m_min']):.2f} m/min, "
+                f"{float(best['power_kw']) / 0.6:.1f}%, {float(best['speed_m_min']):.2f} m/min, "
                 f"{float(best['air_pressure_mpa']):.2f} MPa, focus {float(best['focus_mm']):.1f} mm"
             ),
             "",
@@ -537,7 +539,14 @@ class MainWindow(QMainWindow):
 
             lines.append(f"{metric}")
             for factor, range_value in sorted(ranges.items(), key=lambda item: item[1], reverse=True):
-                lines.append(f"  {factor}: R={range_value}, best={best_levels[factor]}")
+                r_val = range_value
+                b_lvl = best_levels[factor]
+                if factor == "power_kw":
+                    r_val = round(r_val / 0.6, 3)
+                    b_lvl = round(b_lvl / 0.6, 3)
+                    lines.append(f"  {factor}: R={r_val}%, best={b_lvl}%")
+                else:
+                    lines.append(f"  {factor}: R={r_val}, best={b_lvl}")
             lines.append("")
 
         return {"status": "success", "text": "\n".join(lines).strip()}

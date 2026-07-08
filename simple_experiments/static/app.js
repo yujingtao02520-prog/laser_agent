@@ -64,7 +64,7 @@ function renderTable() {
 
         tr.innerHTML = `
             <td><strong>${run.episode_id}</strong></td>
-            <td>${run.power_kw} kW</td>
+            <td>${(run.power_kw / 0.6).toFixed(1)}%</td>
             <td>${run.speed_m_min} m/min</td>
             <td>${run.air_pressure_mpa} MPa</td>
             <td>${run.focus_mm} mm</td>
@@ -116,7 +116,7 @@ async function handleNewRunSubmit(e) {
     e.preventDefault();
 
     const data = {
-        power_kw: parseFloat(document.getElementById('input-power').value),
+        power_kw: parseFloat(document.getElementById('input-power').value) * 0.6,
         speed_m_min: parseFloat(document.getElementById('input-speed').value),
         air_pressure_mpa: parseFloat(document.getElementById('input-pressure').value),
         focus_mm: parseFloat(document.getElementById('input-focus').value),
@@ -137,7 +137,7 @@ async function handleNewRunSubmit(e) {
         const result = await res.json();
         
         // Reset form (keep materials/thickness as default helper)
-        document.getElementById('input-power').value = '';
+        document.getElementById('input-power').value = '83';
         document.getElementById('input-speed').value = '';
         document.getElementById('input-pressure').value = '';
         document.getElementById('input-focus').value = '';
@@ -160,7 +160,7 @@ function openSupplementModal(episodeId) {
     document.getElementById('modal-episode-id').textContent = run.episode_id;
     document.getElementById('modal-hidden-episode-id').value = run.episode_id;
     document.getElementById('modal-params-summary').textContent = 
-        `${run.power_kw}kW | ${run.speed_m_min}m/min | ${run.air_pressure_mpa}MPa | ${run.focus_mm}mm`;
+        `${(run.power_kw / 0.6).toFixed(1)}% | ${run.speed_m_min}m/min | ${run.air_pressure_mpa}MPa | ${run.focus_mm}mm`;
 
     // Populate inputs
     document.getElementById('modal-cut-through').checked = run.cut_through;
@@ -273,7 +273,7 @@ function renderAnalysisDetails() {
     document.getElementById('best-observed-score').textContent = best.quality_score ? best.quality_score.toFixed(1) : '--';
     document.getElementById('best-observed-params').innerHTML = `
         <div>Episode: <strong>${best.episode_id}</strong></div>
-        <div>Power: <strong>${best.power_kw} kW</strong></div>
+        <div>Power: <strong>${(best.power_kw / 0.6).toFixed(1)}%</strong></div>
         <div>Speed: <strong>${best.speed_m_min} m/min</strong></div>
         <div>Pressure: <strong>${best.air_pressure_mpa} MPa</strong></div>
         <div>Focus: <strong>${best.focus_mm} mm</strong></div>
@@ -321,11 +321,13 @@ function renderMetricAnalysis(metric) {
         const bestLvl = metricInfo.best_levels[factor];
         
         let labelName = factor;
-        if (factor === 'power_kw') labelName = 'Laser Power';
+        if (factor === 'power_kw') labelName = 'Laser Power (%)';
         if (factor === 'speed_m_min') labelName = 'Cutting Speed';
         if (factor === 'air_pressure_mpa') labelName = 'Assist Gas Pressure';
         if (factor === 'focus_mm') labelName = 'Focus Position';
 
+        const rangeDisplay = factor === 'power_kw' ? (range / 0.6).toFixed(1) + '%' : range;
+        const bestLvlDisplay = factor === 'power_kw' ? (bestLvl / 0.6).toFixed(1) + '%' : bestLvl;
         listHtml += `
             <div class="factor-rank-item">
                 <div class="factor-name">
@@ -333,8 +335,8 @@ function renderMetricAnalysis(metric) {
                     <span>${labelName}</span>
                 </div>
                 <div class="factor-stats">
-                    <span class="text-muted mr-4">Range (R) = ${range}</span>
-                    <span class="factor-best-level">Best Level: ${bestLvl}</span>
+                    <span class="text-muted mr-4">Range (R) = ${rangeDisplay}</span>
+                    <span class="factor-best-level">Best Level: ${bestLvlDisplay}</span>
                 </div>
             </div>
         `;
@@ -356,13 +358,19 @@ function renderMetricAnalysis(metric) {
 
     Object.entries(metricInfo.k_means).forEach(([factor, means]) => {
         let labelName = factor;
-        if (factor === 'power_kw') labelName = 'Power (kW)';
+        if (factor === 'power_kw') labelName = 'Power (%)';
         if (factor === 'speed_m_min') labelName = 'Speed (m/min)';
         if (factor === 'air_pressure_mpa') labelName = 'Pressure (MPa)';
         if (factor === 'focus_mm') labelName = 'Focus (mm)';
 
         const meansStr = Object.entries(means)
-            .map(([lvl, val]) => `<strong>${lvl}</strong>: ${val}`)
+            .map(([lvl, val]) => {
+                let lvlLabel = lvl;
+                if (factor === 'power_kw') {
+                    lvlLabel = (parseFloat(lvl) / 0.6).toFixed(0) + '%';
+                }
+                return `<strong>${lvlLabel}</strong>: ${val}`;
+            })
             .join(' | ');
 
         tableHtml += `

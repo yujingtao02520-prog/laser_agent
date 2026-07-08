@@ -68,8 +68,8 @@
                 <form id="form-new-run">
                     <div class="form-grid">
                         <div class="form-group">
-                            <label for="input-power">Laser Power (kW)</label>
-                            <input type="number" id="input-power" step="0.1" min="10" max="100" required placeholder="e.g. 54">
+                            <label for="input-power">Laser Power (%)</label>
+                            <input type="number" id="input-power" step="1" min="0" max="100" required placeholder="e.g. 83" value="83">
                         </div>
                         <div class="form-group">
                             <label for="input-speed">Cutting Speed (m/min)</label>
@@ -124,7 +124,7 @@
                         <thead>
                             <tr>
                                 <th>Episode ID</th>
-                                <th>Power (kW)</th>
+                                <th>Power (%)</th>
                                 <th>Speed (m/m)</th>
                                 <th>Pressure (MPa)</th>
                                 <th>Focus (mm)</th>
