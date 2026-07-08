@@ -53,6 +53,18 @@ class QualityInspectionUpdate(BaseModel):
     manual_comment: Optional[str] = ""
     quality_score: Optional[float] = None
 
+class UpdateExperimentParams(BaseModel):
+    new_episode_id: str
+    material: str
+    thickness_mm: float
+    gas: str
+    power_kw: float
+    speed_m_min: float
+    air_pressure_mpa: float
+    focus_mm: float
+    nozzle_height_mm: float
+    nozzle_diameter_mm: float
+
 # API Endpoints
 @app.get("/api/experiments")
 def read_experiments():
@@ -78,6 +90,31 @@ def delete_experiment(episode_id: str):
         return {"status": "success", "episode_id": episode_id}
     except HTTPException as he:
         raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/experiments/last")
+def read_last_experiment():
+    try:
+        params = gui_db.get_last_run_parameters()
+        if params is None:
+            return {}
+        return params
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/experiments/{episode_id}/parameters")
+def update_experiment_parameters(episode_id: str, params: UpdateExperimentParams):
+    try:
+        # Check if episode exists
+        runs = gui_db.get_all_runs()
+        if not any(r['episode_id'] == episode_id for r in runs):
+            raise HTTPException(status_code=404, detail=f"Episode {episode_id} not found")
+            
+        gui_db.update_run_parameters(episode_id, params.new_episode_id, params.model_dump())
+        return {"status": "success", "episode_id": params.new_episode_id}
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

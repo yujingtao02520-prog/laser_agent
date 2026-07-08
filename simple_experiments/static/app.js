@@ -4,10 +4,12 @@ let activeAnalysisMetric = 'quality_score';
 
 document.addEventListener('DOMContentLoaded', () => {
     loadExperiments();
+    initializeInputsFromLastRun();
 
     // Event listeners
     document.getElementById('form-new-run').addEventListener('submit', handleNewRunSubmit);
     document.getElementById('form-supplement-quality').addEventListener('submit', handleSupplementQualitySubmit);
+    document.getElementById('form-edit-parameters').addEventListener('submit', handleEditParametersSubmit);
     document.getElementById('btn-run-analysis').addEventListener('click', runRangeAnalysis);
 });
 
@@ -20,18 +22,57 @@ function toggleAdvancedSettings() {
     arrow.classList.toggle('fa-chevron-up');
 }
 
+// Initialize parameters from the last run (Memory on start-up)
+async function initializeInputsFromLastRun() {
+    try {
+        const res = await fetch('/api/experiments/last');
+        if (!res.ok) throw new Error('无法加载历史记忆参数');
+        const lastParams = await res.json();
+        
+        if (lastParams && lastParams.power_kw) {
+            document.getElementById('input-power').value = Math.round(lastParams.power_kw / 0.6);
+            document.getElementById('input-speed').value = lastParams.speed_m_min;
+            document.getElementById('input-pressure').value = lastParams.air_pressure_mpa;
+            document.getElementById('input-focus').value = lastParams.focus_position_mm || lastParams.focus_mm;
+            document.getElementById('input-material').value = lastParams.material || 'carbon_steel';
+            document.getElementById('input-thickness').value = lastParams.thickness_mm || 30;
+            document.getElementById('input-gas').value = lastParams.assist_gas || lastParams.gas || 'air';
+            document.getElementById('input-nozzle-h').value = lastParams.nozzle_height_mm || 1.0;
+        }
+    } catch (err) {
+        console.warn('初始化历史输入参数失败:', err);
+    }
+}
+
+// Load parameters of a historical run into the left inputs
+function loadToInputs(episodeId) {
+    const run = allExperiments.find(r => r.episode_id === episodeId);
+    if (!run) return;
+
+    document.getElementById('input-power').value = Math.round(run.power_kw / 0.6);
+    document.getElementById('input-speed').value = run.speed_m_min;
+    document.getElementById('input-pressure').value = run.air_pressure_mpa;
+    document.getElementById('input-focus').value = run.focus_mm;
+    document.getElementById('input-material').value = run.material;
+    document.getElementById('input-thickness').value = run.thickness_mm;
+    document.getElementById('input-gas').value = run.gas;
+    document.getElementById('input-nozzle-h').value = run.nozzle_height_mm;
+
+    alert(`已将试验 [${episodeId}] 的参数复制并载入左侧输入栏！`);
+}
+
 // Fetch all experiment runs
 async function loadExperiments() {
     try {
         const res = await fetch('/api/experiments');
-        if (!res.ok) throw new Error('Failed to load experiments');
+        if (!res.ok) throw new Error('加载数据失败');
         
         allExperiments = await res.json();
         renderTable();
         calculateStats();
     } catch (err) {
         console.error(err);
-        alert('Error loading experiments: ' + err.message);
+        alert('加载试验记录出错: ' + err.message);
     }
 }
 
@@ -41,7 +82,7 @@ function renderTable() {
     tbody.innerHTML = '';
 
     if (allExperiments.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="text-center">No experiment records found. Add a new run above to get started.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center">暂无试验记录。请在左侧输入参数以录入第一条切割数据。</td></tr>';
         return;
     }
 
@@ -50,17 +91,23 @@ function renderTable() {
         
         const isCutThrough = run.cut_through;
         const cutBadge = isCutThrough 
-            ? '<span class="badge badge-success">Yes</span>' 
-            : '<span class="badge badge-danger">No</span>';
+            ? '<span class="badge badge-success">是</span>' 
+            : '<span class="badge badge-danger">否</span>';
             
-        let failBadge = '<span class="badge badge-neutral">normal</span>';
+        let failBadge = '<span class="badge badge-neutral">正常</span>';
         if (run.failure_case !== 'normal') {
-            failBadge = `<span class="badge badge-warning">${run.failure_case}</span>`;
+            const failZh = {
+                'incomplete_cut': '未切透',
+                'overburn': '过烧',
+                'dross': '挂渣',
+                'unstable_cut': '不稳定'
+            }[run.failure_case] || run.failure_case;
+            failBadge = `<span class="badge badge-warning">${failZh}</span>`;
         }
 
         const scoreText = run.quality_score !== null 
             ? parseFloat(run.quality_score).toFixed(1) 
-            : '<span class="text-muted">No data</span>';
+            : '<span class="text-muted">暂无数据</span>';
 
         tr.innerHTML = `
             <td><strong>${run.episode_id}</strong></td>
@@ -72,12 +119,18 @@ function renderTable() {
             <td>${failBadge}</td>
             <td><strong>${scoreText}</strong></td>
             <td>
-                <div class="action-buttons">
-                    <button class="btn btn-secondary-outline btn-sm" onclick="openSupplementModal('${run.episode_id}')">
-                        <i class="fa-solid fa-edit"></i> Supplement Quality
+                <div style="display:flex; gap: 4px;">
+                    <button class="btn btn-secondary-outline btn-sm" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="loadToInputs('${run.episode_id}')">
+                        <i class="fa-solid fa-file-import"></i> 载入
                     </button>
-                    <button class="btn btn-danger-outline btn-sm" onclick="deleteExperiment('${run.episode_id}')">
-                        <i class="fa-solid fa-trash"></i> Delete
+                    <button class="btn btn-secondary-outline btn-sm" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="openSupplementModal('${run.episode_id}')">
+                        <i class="fa-solid fa-edit"></i> 检测
+                    </button>
+                    <button class="btn btn-secondary-outline btn-sm" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="openEditModal('${run.episode_id}')">
+                        <i class="fa-solid fa-sliders"></i> 修改
+                    </button>
+                    <button class="btn btn-secondary-outline btn-sm btn-danger-custom" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="deleteExperiment('${run.episode_id}')">
+                        <i class="fa-solid fa-trash"></i> 删除
                     </button>
                 </div>
             </td>
@@ -107,7 +160,26 @@ function calculateStats() {
         const avg = (sum / scoredRuns.length).toFixed(1);
         document.getElementById('stat-avg-score').textContent = `${avg} / 100`;
     } else {
-        document.getElementById('stat-avg-score').textContent = 'No scores';
+        document.getElementById('stat-avg-score').textContent = '暂无评分';
+    }
+}
+
+// Delete experiment run
+async function deleteExperiment(episodeId) {
+    if (!confirm(`确认要删除试切记录 [${episodeId}] 吗？`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/experiments/${episodeId}`, {
+            method: 'DELETE'
+        });
+
+        if (!res.ok) throw new Error('删除失败');
+        
+        await loadExperiments();
+    } catch (err) {
+        alert('删除失败: ' + err.message);
     }
 }
 
@@ -133,14 +205,11 @@ async function handleNewRunSubmit(e) {
             body: JSON.stringify(data)
         });
 
-        if (!res.ok) throw new Error('Failed to record run');
+        if (!res.ok) throw new Error('保存失败');
         const result = await res.json();
         
-        // Reset form (keep materials/thickness as default helper)
-        document.getElementById('input-power').value = '83';
-        document.getElementById('input-speed').value = '';
-        document.getElementById('input-pressure').value = '';
-        document.getElementById('input-focus').value = '';
+        // CRITICAL MEMORY FEATURE: Do NOT reset the form input values!
+        // This keeps the values in fields so users can adjust and log next run easily.
 
         // Reload data
         await loadExperiments();
@@ -148,7 +217,7 @@ async function handleNewRunSubmit(e) {
         // Open modal for the newly created run immediately
         openSupplementModal(result.episode_id);
     } catch (err) {
-        alert('Error saving run: ' + err.message);
+        alert('保存切割参数出错: ' + err.message);
     }
 }
 
@@ -207,33 +276,73 @@ async function handleSupplementQualitySubmit(e) {
             body: JSON.stringify(data)
         });
 
-        if (!res.ok) throw new Error('Failed to update quality inspection data');
+        if (!res.ok) throw new Error('保存检测数据失败');
         
         closeQualityModal();
         await loadExperiments();
     } catch (err) {
-        alert('Error saving inspection data: ' + err.message);
+        alert('保存检测数据出错: ' + err.message);
     }
 }
 
-async function deleteExperiment(episodeId) {
-    const confirmed = confirm(`Delete experiment ${episodeId}? This will remove it from the local database and CSV log.`);
-    if (!confirmed) return;
+// Open modal to modify parameters and rename ID
+function openEditModal(episodeId) {
+    const run = allExperiments.find(r => r.episode_id === episodeId);
+    if (!run) return;
+
+    document.getElementById('edit-hidden-old-id').value = run.episode_id;
+    document.getElementById('edit-episode-id').value = run.episode_id;
+    document.getElementById('edit-power').value = Math.round(run.power_kw / 0.6);
+    document.getElementById('edit-speed').value = run.speed_m_min;
+    document.getElementById('edit-pressure').value = run.air_pressure_mpa;
+    document.getElementById('edit-focus').value = run.focus_mm;
+    document.getElementById('edit-material').value = run.material;
+    document.getElementById('edit-thickness').value = run.thickness_mm;
+    document.getElementById('edit-gas').value = run.gas;
+    document.getElementById('edit-nozzle-h').value = run.nozzle_height_mm;
+
+    // Show modal
+    document.getElementById('edit-modal').classList.remove('hidden');
+}
+
+function closeEditModal() {
+    document.getElementById('edit-modal').classList.add('hidden');
+}
+
+// Handle parameters modification submit
+async function handleEditParametersSubmit(e) {
+    e.preventDefault();
+    const oldId = document.getElementById('edit-hidden-old-id').value;
+
+    const data = {
+        new_episode_id: document.getElementById('edit-episode-id').value.trim(),
+        power_kw: parseFloat(document.getElementById('edit-power').value) * 0.6,
+        speed_m_min: parseFloat(document.getElementById('edit-speed').value),
+        air_pressure_mpa: parseFloat(document.getElementById('edit-pressure').value),
+        focus_mm: parseFloat(document.getElementById('edit-focus').value),
+        material: document.getElementById('edit-material').value.trim(),
+        thickness_mm: parseFloat(document.getElementById('edit-thickness').value),
+        gas: document.getElementById('edit-gas').value.trim(),
+        nozzle_height_mm: parseFloat(document.getElementById('edit-nozzle-h').value),
+        nozzle_diameter_mm: 4.0 // Fixed / inherited
+    };
 
     try {
-        const res = await fetch(`/api/experiments/${encodeURIComponent(episodeId)}`, {
-            method: 'DELETE'
+        const res = await fetch(`/api/experiments/${oldId}/parameters`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
         });
 
-        if (!res.ok) throw new Error('Failed to delete experiment');
-
-        if (analysisData) {
-            analysisData = null;
-            closeAnalysis();
+        if (!res.ok) {
+            const errBody = await res.json();
+            throw new Error(errBody.detail || '修改保存失败');
         }
+        
+        closeEditModal();
         await loadExperiments();
     } catch (err) {
-        alert('Error deleting experiment: ' + err.message);
+        alert('修改参数出错: ' + err.message);
     }
 }
 
@@ -246,7 +355,7 @@ function getFloatOrNull(id) {
 async function runRangeAnalysis() {
     try {
         const res = await fetch('/api/analyze', { method: 'POST' });
-        if (!res.ok) throw new Error('Range analysis failed');
+        if (!res.ok) throw new Error('极差分析执行失败');
         
         analysisData = await res.json();
         if (analysisData.status === 'warning') {
@@ -261,7 +370,7 @@ async function runRangeAnalysis() {
         // Scroll to analysis
         document.getElementById('analysis-section').scrollIntoView({ behavior: 'smooth' });
     } catch (err) {
-        alert('Error running analysis: ' + err.message);
+        alert('运行极差分析出错: ' + err.message);
     }
 }
 
@@ -272,11 +381,11 @@ function renderAnalysisDetails() {
     const best = analysisData.best_observed;
     document.getElementById('best-observed-score').textContent = best.quality_score ? best.quality_score.toFixed(1) : '--';
     document.getElementById('best-observed-params').innerHTML = `
-        <div>Episode: <strong>${best.episode_id}</strong></div>
-        <div>Power: <strong>${(best.power_kw / 0.6).toFixed(1)}%</strong></div>
-        <div>Speed: <strong>${best.speed_m_min} m/min</strong></div>
-        <div>Pressure: <strong>${best.air_pressure_mpa} MPa</strong></div>
-        <div>Focus: <strong>${best.focus_mm} mm</strong></div>
+        <div>试验 ID: <strong>${best.episode_id}</strong></div>
+        <div>激光功率: <strong>${(best.power_kw / 0.6).toFixed(1)}%</strong></div>
+        <div>切割速度: <strong>${best.speed_m_min} m/min</strong></div>
+        <div>辅助气压: <strong>${best.air_pressure_mpa} MPa</strong></div>
+        <div>焦点位置: <strong>${best.focus_mm} mm</strong></div>
     `;
 
     // Render rankings for active tab metric
@@ -289,9 +398,9 @@ function switchAnalysisMetric(metric) {
     // Update active tab styling
     const tabs = document.querySelectorAll('.tab-btn');
     tabs.forEach(btn => {
-        if (btn.textContent.toLowerCase().includes('score') && metric === 'quality_score' ||
-            btn.textContent.toLowerCase().includes('dross') && metric === 'dross_height_max_mm' ||
-            btn.textContent.toLowerCase().includes('roughness') && metric === 'roughness_Sa_um') {
+        if (btn.textContent.includes('综合得分') && metric === 'quality_score' ||
+            btn.textContent.includes('最大挂渣') && metric === 'dross_height_max_mm' ||
+            btn.textContent.includes('表面粗糙') && metric === 'roughness_Sa_um') {
             btn.classList.add('active');
         } else {
             btn.classList.remove('active');
@@ -307,7 +416,7 @@ function renderMetricAnalysis(metric) {
 
     const metricInfo = analysisData.metrics_analysis[metric];
     if (!metricInfo) {
-        container.innerHTML = '<p class="text-muted">No analysis data available for this metric. Make sure inspection results are logged.</p>';
+        container.innerHTML = '<p class="text-muted">本指标暂无足够的数据进行分析。确保至少有一些切割记录完成了质量打分。</p>';
         return;
     }
 
@@ -321,13 +430,14 @@ function renderMetricAnalysis(metric) {
         const bestLvl = metricInfo.best_levels[factor];
         
         let labelName = factor;
-        if (factor === 'power_kw') labelName = 'Laser Power (%)';
-        if (factor === 'speed_m_min') labelName = 'Cutting Speed';
-        if (factor === 'air_pressure_mpa') labelName = 'Assist Gas Pressure';
-        if (factor === 'focus_mm') labelName = 'Focus Position';
+        if (factor === 'power_kw') labelName = '激光功率';
+        if (factor === 'speed_m_min') labelName = '切割速度';
+        if (factor === 'air_pressure_mpa') labelName = '辅助气压';
+        if (factor === 'focus_mm') labelName = '焦点位置';
 
         const rangeDisplay = factor === 'power_kw' ? (range / 0.6).toFixed(1) + '%' : range;
         const bestLvlDisplay = factor === 'power_kw' ? (bestLvl / 0.6).toFixed(1) + '%' : bestLvl;
+
         listHtml += `
             <div class="factor-rank-item">
                 <div class="factor-name">
@@ -335,8 +445,8 @@ function renderMetricAnalysis(metric) {
                     <span>${labelName}</span>
                 </div>
                 <div class="factor-stats">
-                    <span class="text-muted mr-4">Range (R) = ${rangeDisplay}</span>
-                    <span class="factor-best-level">Best Level: ${bestLvlDisplay}</span>
+                    <span class="text-muted mr-4">极差值 R = ${rangeDisplay}</span>
+                    <span class="factor-best-level">最优水平: ${bestLvlDisplay}</span>
                 </div>
             </div>
         `;
@@ -345,12 +455,12 @@ function renderMetricAnalysis(metric) {
 
     // Append K-means table
     let tableHtml = `
-        <h4 class="mt-4" style="font-size: 0.9rem; font-weight:600; margin-bottom: 0.5rem;">K-Means (Averages per Level)</h4>
+        <h4 class="mt-4" style="font-size: 0.9rem; font-weight:600; margin-bottom: 0.5rem;">K平均值 (不同水平的平均得分情况)</h4>
         <table class="k-means-table">
             <thead>
                 <tr>
-                    <th>Factor</th>
-                    <th>Level Means</th>
+                    <th>工艺因素</th>
+                    <th>各水平平均值</th>
                 </tr>
             </thead>
             <tbody>
@@ -358,10 +468,10 @@ function renderMetricAnalysis(metric) {
 
     Object.entries(metricInfo.k_means).forEach(([factor, means]) => {
         let labelName = factor;
-        if (factor === 'power_kw') labelName = 'Power (%)';
-        if (factor === 'speed_m_min') labelName = 'Speed (m/min)';
-        if (factor === 'air_pressure_mpa') labelName = 'Pressure (MPa)';
-        if (factor === 'focus_mm') labelName = 'Focus (mm)';
+        if (factor === 'power_kw') labelName = '激光功率 (%)';
+        if (factor === 'speed_m_min') labelName = '切割速度 (m/min)';
+        if (factor === 'air_pressure_mpa') labelName = '辅助气压 (MPa)';
+        if (factor === 'focus_mm') labelName = '焦点位置 (mm)';
 
         const meansStr = Object.entries(means)
             .map(([lvl, val]) => {

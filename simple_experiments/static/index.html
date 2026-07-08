@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Laser Cutting Orthogonal Experiment Data Logger</title>
+    <title>激光切割正交实验数据记录工具</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -20,123 +20,123 @@
             <div class="logo">
                 <i class="fa-solid fa-bolt-lightning logo-icon"></i>
                 <div class="logo-text">
-                    <h1>Laser Cut Copilot</h1>
-                    <span>Orthogonal Data Logger (Simple Version)</span>
+                    <h1>激光切割工艺助手</h1>
+                    <span>正交试验数据记录工具 (极简版)</span>
                 </div>
             </div>
             <div class="header-actions">
                 <button id="btn-run-analysis" class="btn btn-primary btn-glow">
-                    <i class="fa-solid fa-chart-line"></i> Run Range Analysis
+                    <i class="fa-solid fa-chart-line"></i> 运行正交极差分析
                 </button>
             </div>
         </div>
     </header>
 
     <main class="app-main">
-        <!-- Stats Dashboard -->
+        <!-- 看板统计 -->
         <section class="stats-grid">
             <div class="stat-card glass-card">
                 <div class="stat-icon icon-blue"><i class="fa-solid fa-vial"></i></div>
                 <div class="stat-info">
-                    <h3>Total Trials</h3>
+                    <h3>总试验次数</h3>
                     <p id="stat-total-runs">-</p>
                 </div>
             </div>
             <div class="stat-card glass-card">
                 <div class="stat-icon icon-green"><i class="fa-solid fa-crop"></i></div>
                 <div class="stat-info">
-                    <h3>Penetration Rate</h3>
+                    <h3>成功切透率</h3>
                     <p id="stat-penetration-rate">-</p>
                 </div>
             </div>
             <div class="stat-card glass-card">
                 <div class="stat-icon icon-purple"><i class="fa-solid fa-star"></i></div>
                 <div class="stat-info">
-                    <h3>Average Quality Score</h3>
+                    <h3>平均质量得分</h3>
                     <p id="stat-avg-score">-</p>
                 </div>
             </div>
         </section>
 
         <div class="main-grid">
-            <!-- Parameter Logger Form -->
+            <!-- 参数录入表单 -->
             <section class="form-container glass-card">
                 <div class="card-header">
-                    <h2><i class="fa-solid fa-plus-circle"></i> Log New Experiment Run</h2>
-                    <p>Enter the machine parameters used for the cut test.</p>
+                    <h2><i class="fa-solid fa-plus-circle"></i> 记录新切割试验</h2>
+                    <p>请输入用于本次试切的工艺参数值。</p>
                 </div>
                 <form id="form-new-run">
                     <div class="form-grid">
                         <div class="form-group">
-                            <label for="input-power">Laser Power (%)</label>
-                            <input type="number" id="input-power" step="1" min="0" max="100" required placeholder="e.g. 83" value="83">
+                            <label for="input-power">激光功率 (%)</label>
+                            <input type="number" id="input-power" step="1" min="0" max="100" required placeholder="例如 83" value="83">
                         </div>
                         <div class="form-group">
-                            <label for="input-speed">Cutting Speed (m/min)</label>
-                            <input type="number" id="input-speed" step="0.01" min="0.1" max="10.0" required placeholder="e.g. 0.8">
+                            <label for="input-speed">切割速度 (m/min)</label>
+                            <input type="number" id="input-speed" step="0.01" min="0.1" max="10.0" required placeholder="例如 0.8">
                         </div>
                         <div class="form-group">
-                            <label for="input-pressure">Gas Pressure (MPa)</label>
-                            <input type="number" id="input-pressure" step="0.01" min="0.1" max="3.0" required placeholder="e.g. 1.5">
+                            <label for="input-pressure">辅助气压 (MPa)</label>
+                            <input type="number" id="input-pressure" step="0.01" min="0.1" max="3.0" required placeholder="例如 1.5">
                         </div>
                         <div class="form-group">
-                            <label for="input-focus">Focus Position (mm)</label>
-                            <input type="number" id="input-focus" step="0.1" min="-30" max="10" required placeholder="e.g. -9">
+                            <label for="input-focus">焦点位置 (mm)</label>
+                            <input type="number" id="input-focus" step="0.1" min="-30" max="10" required placeholder="例如 -9">
                         </div>
                     </div>
                     <div class="advanced-toggle" onclick="toggleAdvancedSettings()">
-                        <span>Advanced Parameters</span> <i class="fa-solid fa-chevron-down" id="adv-arrow"></i>
+                        <span>高级辅助参数</span> <i class="fa-solid fa-chevron-down" id="adv-arrow"></i>
                     </div>
                     <div class="advanced-settings hidden" id="advanced-fields">
                         <div class="form-grid">
                             <div class="form-group">
-                                <label for="input-material">Material</label>
+                                <label for="input-material">材料材质</label>
                                 <input type="text" id="input-material" value="carbon_steel">
                             </div>
                             <div class="form-group">
-                                <label for="input-thickness">Thickness (mm)</label>
+                                <label for="input-thickness">材料厚度 (mm)</label>
                                 <input type="number" id="input-thickness" value="30" step="0.1">
                             </div>
                             <div class="form-group">
-                                <label for="input-gas">Assist Gas</label>
+                                <label for="input-gas">辅助气体</label>
                                 <input type="text" id="input-gas" value="air">
                             </div>
                             <div class="form-group">
-                                <label for="input-nozzle-h">Nozzle Height (mm)</label>
+                                <label for="input-nozzle-h">喷嘴高度 (mm)</label>
                                 <input type="number" id="input-nozzle-h" value="1.0" step="0.1">
                             </div>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-secondary w-100 mt-4">
-                        <i class="fa-solid fa-save"></i> Save Run Parameters
+                        <i class="fa-solid fa-save"></i> 保存切割参数
                     </button>
                 </form>
             </section>
 
-            <!-- Table of Experiments -->
+            <!-- 试验记录表格 -->
             <section class="table-container glass-card">
                 <div class="card-header">
-                    <h2><i class="fa-solid fa-list-check"></i> Experiment Runs Log</h2>
-                    <p>All recorded trials. Click "Supplement Quality" to input inspection measurements.</p>
+                    <h2><i class="fa-solid fa-list-check"></i> 切割试验记录表</h2>
+                    <p>所有已记录的试切。点击操作栏的“检测”可录入/补充切后质量测量数据，点击“载入”填回输入栏。</p>
                 </div>
                 <div class="table-responsive">
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>Episode ID</th>
-                                <th>Power (%)</th>
-                                <th>Speed (m/m)</th>
-                                <th>Pressure (MPa)</th>
-                                <th>Focus (mm)</th>
-                                <th>Cut Through</th>
-                                <th>Failure Mode</th>
-                                <th>Quality Score</th>
-                                <th>Actions</th>
+                                <th>试验名称/ID</th>
+                                <th>功率 (%)</th>
+                                <th>速度 (m/min)</th>
+                                <th>气压 (MPa)</th>
+                                <th>焦点 (mm)</th>
+                                <th>是否切透</th>
+                                <th>异常模式</th>
+                                <th>质量得分</th>
+                                <th>操作栏</th>
                             </tr>
                         </thead>
                         <tbody id="experiments-table-body">
                             <tr>
-                                <td colspan="9" class="text-center">Loading experiments...</td>
+                                <td colspan="9" class="text-center">加载试验数据中...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -144,29 +144,29 @@
             </section>
         </div>
 
-        <!-- Analysis Results Drawer/Container -->
+        <!-- 极差分析展示面板 -->
         <section id="analysis-section" class="analysis-results glass-card hidden">
             <div class="card-header">
                 <div class="header-flex">
-                    <h2><i class="fa-solid fa-circle-nodes"></i> Orthogonal Range Analysis</h2>
-                    <button class="btn btn-text" onclick="closeAnalysis()"><i class="fa-solid fa-times"></i> Close</button>
+                    <h2><i class="fa-solid fa-circle-nodes"></i> 正交极差分析结果</h2>
+                    <button class="btn btn-text" onclick="closeAnalysis()"><i class="fa-solid fa-times"></i> 关闭</button>
                 </div>
-                <p>Range analysis findings based on all recorded quality scores.</p>
+                <p>基于当前所有已录入并具有质量得分的试件进行正交实验极差分析。</p>
             </div>
             <div class="analysis-grid">
                 <div class="best-observed-box">
-                    <h3>Best Observed Trial</h3>
+                    <h3>最优切割试验记录</h3>
                     <div class="best-score-badge" id="best-observed-score">--</div>
                     <div class="best-params-details" id="best-observed-params">
                         <!-- Filled by JS -->
                     </div>
                 </div>
                 <div class="factor-ranks-box">
-                    <h3>Factor Influence Rankings (R-value)</h3>
+                    <h3>因素影响权重排名 (R-极差值)</h3>
                     <div class="metric-tabs">
-                        <button class="tab-btn active" onclick="switchAnalysisMetric('quality_score')">Quality Score</button>
-                        <button class="tab-btn" onclick="switchAnalysisMetric('dross_height_max_mm')">Max Dross Height</button>
-                        <button class="tab-btn" onclick="switchAnalysisMetric('roughness_Sa_um')">Sa Roughness</button>
+                        <button class="tab-btn active" onclick="switchAnalysisMetric('quality_score')">综合得分</button>
+                        <button class="tab-btn" onclick="switchAnalysisMetric('dross_height_max_mm')">最大挂渣高度</button>
+                        <button class="tab-btn" onclick="switchAnalysisMetric('roughness_Sa_um')">表面粗糙度</button>
                     </div>
                     <div id="metric-analysis-details" class="mt-4">
                         <!-- Filled by JS -->
@@ -176,11 +176,11 @@
         </section>
     </main>
 
-    <!-- Modal for Supplementing Quality Inspection -->
+    <!-- 弹窗：补充质量检测数据 -->
     <div class="modal-backdrop hidden" id="quality-modal">
         <div class="modal-card glass-card">
             <div class="modal-header">
-                <h2>Supplement Inspection Quality</h2>
+                <h2>录入/补充切后检测数据</h2>
                 <button class="close-btn" onclick="closeQualityModal()"><i class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-meta">
@@ -193,55 +193,110 @@
                     <div class="form-group col-span-2 flex-row">
                         <label for="modal-cut-through" class="checkbox-label">
                             <input type="checkbox" id="modal-cut-through" checked>
-                            <span>Successfully Cut Through Material</span>
+                            <span>成功切透板材</span>
                         </label>
                     </div>
                     <div class="form-group">
-                        <label for="modal-failure">Failure Mode Classification</label>
+                        <label for="modal-failure">异常切割模式分类</label>
                         <select id="modal-failure">
-                            <option value="normal">normal (Good Cut)</option>
-                            <option value="incomplete_cut">incomplete_cut (Not penetrated)</option>
-                            <option value="overburn">overburn (Excessive heat/melting)</option>
-                            <option value="dross">dross (Heavy slag clinging)</option>
-                            <option value="unstable_cut">unstable_cut (Intermittent penetration)</option>
+                            <option value="normal">正常 (normal)</option>
+                            <option value="incomplete_cut">未切透 (incomplete_cut)</option>
+                            <option value="overburn">过烧 (overburn)</option>
+                            <option value="dross">过重挂渣 (dross)</option>
+                            <option value="unstable_cut">切割不稳定 (unstable_cut)</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="modal-dross-max">Max Dross Height (mm)</label>
-                        <input type="number" id="modal-dross-max" step="0.01" min="0" placeholder="e.g. 0.35">
+                        <label for="modal-dross-max">最大挂渣高度 (mm)</label>
+                        <input type="number" id="modal-dross-max" step="0.01" min="0" placeholder="例如 0.35">
                     </div>
                     <div class="form-group">
-                        <label for="modal-dross-mean">Mean Dross Height (mm)</label>
-                        <input type="number" id="modal-dross-mean" step="0.01" min="0" placeholder="e.g. 0.18">
+                        <label for="modal-dross-mean">平均挂渣高度 (mm)</label>
+                        <input type="number" id="modal-dross-mean" step="0.01" min="0" placeholder="例如 0.18">
                     </div>
                     <div class="form-group">
-                        <label for="modal-roughness">Surface Roughness Sa (μm)</label>
-                        <input type="number" id="modal-roughness" step="0.1" min="0" placeholder="e.g. 9.8">
+                        <label for="modal-roughness">表面粗糙度 Sa (μm)</label>
+                        <input type="number" id="modal-roughness" step="0.1" min="0" placeholder="例如 9.8">
                     </div>
                     <div class="form-group">
-                        <label for="modal-kerf-top">Kerf Width Top (mm)</label>
-                        <input type="number" id="modal-kerf-top" step="0.01" min="0" placeholder="e.g. 1.05">
+                        <label for="modal-kerf-top">上切缝宽度 (mm)</label>
+                        <input type="number" id="modal-kerf-top" step="0.01" min="0" placeholder="例如 1.05">
                     </div>
                     <div class="form-group">
-                        <label for="modal-kerf-bottom">Kerf Width Bottom (mm)</label>
-                        <input type="number" id="modal-kerf-bottom" step="0.01" min="0" placeholder="e.g. 0.82">
+                        <label for="modal-kerf-bottom">下切缝宽度 (mm)</label>
+                        <input type="number" id="modal-kerf-bottom" step="0.01" min="0" placeholder="例如 0.82">
                     </div>
                     <div class="form-group">
-                        <label for="modal-defect-area">Defect Area (mm²)</label>
-                        <input type="number" id="modal-defect-area" step="0.1" min="0" placeholder="e.g. 0.0">
+                        <label for="modal-defect-area">缺陷面积 (mm²)</label>
+                        <input type="number" id="modal-defect-area" step="0.1" min="0" placeholder="例如 0.0">
                     </div>
                     <div class="form-group">
-                        <label for="modal-quality-score">Overall Quality Score (0 - 100)</label>
-                        <input type="number" id="modal-quality-score" step="0.1" min="0" max="100" placeholder="Leave empty for auto-calc">
+                        <label for="modal-quality-score">综合质量得分 (0-100)</label>
+                        <input type="number" id="modal-quality-score" step="0.1" min="0" max="100" placeholder="留空则由系统自动打分">
                     </div>
                     <div class="form-group col-span-2">
-                        <label for="modal-comment">Operator Inspection Comments</label>
-                        <textarea id="modal-comment" rows="2" placeholder="Describe cut surface appearance, slag ease of removal, etc."></textarea>
+                        <label for="modal-comment">检测员备注 (Operator Comments)</label>
+                        <textarea id="modal-comment" rows="2" placeholder="描述试件外观、熔渣是否容易剥离、粗糙度变化趋势等..."></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary-outline" onclick="closeQualityModal()">Cancel</button>
-                    <button type="submit" class="btn btn-secondary">Save Inspection Data</button>
+                    <button type="button" class="btn btn-secondary-outline" onclick="closeQualityModal()">取消</button>
+                    <button type="submit" class="btn btn-secondary">保存检测数据</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 弹窗：修改工艺参数与重命名 -->
+    <div class="modal-backdrop hidden" id="edit-modal">
+        <div class="modal-card glass-card">
+            <div class="modal-header">
+                <h2>修改切割参数与名称</h2>
+                <button class="close-btn" onclick="closeEditModal()"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <form id="form-edit-parameters">
+                <input type="hidden" id="edit-hidden-old-id">
+                <div class="form-grid">
+                    <div class="form-group col-span-2">
+                        <label for="edit-episode-id">试验名称/ID (必须唯一)</label>
+                        <input type="text" id="edit-episode-id" required placeholder="例如 LC_CS30_AIR_L9_0010">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-power">激光功率 (%)</label>
+                        <input type="number" id="edit-power" step="1" min="0" max="100" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-speed">切割速度 (m/min)</label>
+                        <input type="number" id="edit-speed" step="0.01" min="0.1" max="10.0" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-pressure">辅助气压 (MPa)</label>
+                        <input type="number" id="edit-pressure" step="0.01" min="0.1" max="3.0" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-focus">焦点位置 (mm)</label>
+                        <input type="number" id="edit-focus" step="0.1" min="-30" max="10" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-material">材料材质</label>
+                        <input type="text" id="edit-material" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-thickness">材料厚度 (mm)</label>
+                        <input type="number" id="edit-thickness" step="0.1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-gas">辅助气体</label>
+                        <input type="text" id="edit-gas" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-nozzle-h">喷嘴高度 (mm)</label>
+                        <input type="number" id="edit-nozzle-h" step="0.1" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary-outline" onclick="closeEditModal()">取消</button>
+                    <button type="submit" class="btn btn-secondary">保存修改</button>
                 </div>
             </form>
         </div>

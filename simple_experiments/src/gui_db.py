@@ -262,5 +262,72 @@ def delete_run(episode_id: str) -> bool:
         
     return deleted
 
+def update_run_parameters(old_episode_id: str, new_episode_id: str, params: Dict[str, Any]) -> bool:
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Check if new_episode_id already exists and is different from old_episode_id
+    if new_episode_id != old_episode_id:
+        cursor.execute("SELECT COUNT(*) FROM experiment_runs WHERE episode_id = ?;", (new_episode_id,))
+        if cursor.fetchone()[0] > 0:
+            conn.close()
+            raise ValueError(f"实验ID/名称 '{new_episode_id}' 已存在，请使用其他名称！")
+            
+    power = float(params.get('power_kw', 54))
+    speed = float(params.get('speed_m_min', 0.8))
+    energy_index = round(power / speed, 3) if speed > 0 else 0.0
+    
+    cursor.execute("""
+        UPDATE experiment_runs SET
+            episode_id = ?,
+            material = ?,
+            thickness_mm = ?,
+            gas = ?,
+            power_kw = ?,
+            speed_m_min = ?,
+            air_pressure_mpa = ?,
+            focus_mm = ?,
+            nozzle_height_mm = ?,
+            nozzle_diameter_mm = ?,
+            energy_index = ?
+        WHERE episode_id = ?;
+    """, (
+        new_episode_id,
+        params.get('material', 'carbon_steel'),
+        float(params.get('thickness_mm', 30)),
+        params.get('gas', 'air'),
+        power,
+        speed,
+        float(params.get('air_pressure_mpa', 1.5)),
+        float(params.get('focus_mm', -9)),
+        float(params.get('nozzle_height_mm', 1.0)),
+        float(params.get('nozzle_diameter_mm', 4.0)),
+        energy_index,
+        old_episode_id
+    ))
+    
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    
+    if updated:
+        sync_to_csv()
+        
+    return updated
+
+def get_last_run_parameters() -> Optional[Dict[str, Any]]:
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Get the last added run (order by rowid desc to get the most recently inserted one)
+    cursor.execute("SELECT * FROM experiment_runs ORDER BY rowid DESC LIMIT 1;")
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return dict(row)
+    return None
+
 # Initialize DB on load
 init_db()
