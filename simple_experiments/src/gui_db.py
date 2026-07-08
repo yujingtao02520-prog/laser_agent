@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 DB_FILE = os.path.join(DB_DIR, "orthogonal_experiments.db")
 CSV_FILE = os.path.join(DB_DIR, "experiment_log.csv")
+JSON_FILE = os.path.join(DB_DIR, "experiment_log.json")
 SOURCE_CSV_FILE = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "正交实验demo", "data", "metadata", "experiment_log.csv"))
 
 def init_db():
@@ -92,8 +93,8 @@ def init_db():
                 print(f"[DB] Error importing initial CSV: {e}")
                 
     conn.close()
-    # Always sync to output folder CSV on init to guarantee consistency
-    sync_to_csv()
+    # Always sync to output folder CSV & JSON on init to guarantee consistency
+    sync_data_to_files()
 
 def sync_to_csv():
     """Syncs the database contents back to experiment_log.csv"""
@@ -107,6 +108,31 @@ def sync_to_csv():
         
     df.to_csv(CSV_FILE, index=False)
     print(f"[DB] Synced SQLite database to {CSV_FILE}")
+
+def sync_to_json():
+    """Syncs the database contents back to experiment_log.json for LLM Agent parsing"""
+    import json
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM experiment_runs ORDER BY episode_id DESC;")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    runs = []
+    for row in rows:
+        run_dict = dict(row)
+        run_dict['cut_through'] = bool(run_dict['cut_through'])
+        runs.append(run_dict)
+        
+    with open(JSON_FILE, "w", encoding="utf-8") as f:
+        json.dump(runs, f, indent=4, ensure_ascii=False)
+    print(f"[DB] Synced SQLite database to {JSON_FILE}")
+
+def sync_data_to_files():
+    """Syncs SQLite database to both CSV and JSON formats"""
+    sync_to_csv()
+    sync_to_json()
 
 def get_all_runs() -> List[Dict[str, Any]]:
     conn = sqlite3.connect(DB_FILE)
@@ -191,7 +217,7 @@ def add_run(params: Dict[str, Any]) -> str:
     conn.commit()
     conn.close()
     
-    sync_to_csv()
+    sync_data_to_files()
     return episode_id
 
 def update_run_quality(episode_id: str, quality: Dict[str, Any]):
@@ -258,7 +284,7 @@ def delete_run(episode_id: str) -> bool:
     conn.close()
     
     if deleted:
-        sync_to_csv()
+        sync_data_to_files()
         
     return deleted
 
@@ -311,7 +337,7 @@ def update_run_parameters(old_episode_id: str, new_episode_id: str, params: Dict
     conn.close()
     
     if updated:
-        sync_to_csv()
+        sync_data_to_files()
         
     return updated
 
