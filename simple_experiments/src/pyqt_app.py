@@ -249,7 +249,7 @@ class EditParamsDialog(QDialog):
         self.episode_id = QLineEdit(run['episode_id'])
         self.power = make_spin(float(run.get('power_kw') or 54) / 0.6, 0.0, 100.0, 1, 1.0)
         self.speed = make_spin(float(run.get('speed_m_min') or 0.8), 0.1, 10.0, 2, 0.05)
-        self.pressure = make_spin(float(run.get('air_pressure_mpa') or 1.5), 0.1, 5.0, 2, 0.05)
+        self.pressure = make_spin(float(run.get('air_pressure_mpa') or 1.5), 0.0, 100.0, 2, 0.05)
         self.focus = make_spin(float(run.get('focus_mm') or -9), -30.0, 10.0, 1, 0.5)
         self.material = QLineEdit(run.get('material') or "carbon_steel")
         self.thickness = make_spin(float(run.get('thickness_mm') or 30), 0.1, 200.0, 1, 0.5)
@@ -369,7 +369,7 @@ class MainWindow(QMainWindow):
 
         self.power = make_spin(83.0, 0.0, 100.0, 1, 1.0)
         self.speed = make_spin(0.9, 0.1, 10.0, 2, 0.05)
-        self.pressure = make_spin(1.5, 0.1, 5.0, 2, 0.05)
+        self.pressure = make_spin(1.5, 0.0, 100.0, 2, 0.05)
         self.focus = make_spin(-9.0, -30.0, 10.0, 1, 0.5)
         self.material = QLineEdit("carbon_steel")
         self.thickness = make_spin(30.0, 0.1, 200.0, 1, 0.5)
