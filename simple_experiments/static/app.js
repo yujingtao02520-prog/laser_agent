@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('form-supplement-quality').addEventListener('submit', handleSupplementQualitySubmit);
     document.getElementById('form-edit-parameters').addEventListener('submit', handleEditParametersSubmit);
     document.getElementById('btn-run-analysis').addEventListener('click', runRangeAnalysis);
+    initDragAndDrop();
 });
 
 // Toggle Advanced settings in form
@@ -1061,4 +1062,101 @@ function webDownsamplePointCloud() {
 function webResetPointCloud() {
     currentPointsData = [...originalPointsData];
     updateWebPointCloudView();
+}
+
+// ==========================================
+// Web Drag & Drop Auto Scan & Archive
+// ==========================================
+
+function initDragAndDrop() {
+    const dropzone = document.getElementById('web-dropzone');
+    if (!dropzone) return;
+    
+    // Prevent defaults
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, preventDefaultDragBehavior, false);
+    });
+    
+    // Highlight dropzone
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropzone.addEventListener(eventName, () => {
+            dropzone.style.borderColor = 'var(--primary)';
+            dropzone.style.background = 'rgba(58, 134, 255, 0.1)';
+        }, false);
+    });
+    
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, () => {
+            dropzone.style.borderColor = 'var(--card-border)';
+            dropzone.style.background = 'rgba(0,0,0,0.15)';
+        }, false);
+    });
+    
+    // Handle dropped files
+    dropzone.addEventListener('drop', handleDrop, false);
+}
+
+function preventDefaultDragBehavior(e) {
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+function handleDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+    if (files.length > 0) {
+        uploadBulkFiles(files);
+    }
+}
+
+function handleBulkFilesSelected() {
+    const fileInput = document.getElementById('web-bulk-file-input');
+    const files = fileInput.files;
+    if (files.length > 0) {
+        uploadBulkFiles(files);
+    }
+}
+
+async function uploadBulkFiles(files) {
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+    }
+    
+    // Show loading state
+    const dropzoneSpan = document.querySelector('#web-dropzone span');
+    const originalText = dropzoneSpan.innerHTML;
+    dropzoneSpan.textContent = '正在上传与自动分发归档中...';
+    
+    try {
+        const res = await fetch('/api/archive/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!res.ok) throw new Error('批量上传分发归档失败');
+        
+        const result = await res.json();
+        const count = result.archived_count || 0;
+        const details = result.details || {};
+        
+        if (count === 0) {
+            alert('扫描上传的文件完成，未发现匹配任何已知试验 ID 的点云或图像。请确认文件名格式包含试验 ID！');
+        } else {
+            let detailMsg = `一键批量分发成功！共成功分发归档 ${count} 个检测文件：\n`;
+            for (const [eid, fields] of Object.entries(details)) {
+                detailMsg += `• 试验 [${eid}]: 归档了 ${fields.length} 个文件\n`;
+            }
+            alert(detailMsg);
+        }
+        
+        // Refresh local table and preview
+        await loadExperiments();
+    } catch (err) {
+        console.error(err);
+        alert('一键批量归档出错: ' + err.message);
+    } finally {
+        dropzoneSpan.innerHTML = originalText;
+        document.getElementById('web-bulk-file-input').value = '';
+    }
 }

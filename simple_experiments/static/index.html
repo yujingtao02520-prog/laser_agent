@@ -215,6 +215,15 @@
                             <!-- Dynamically loaded by JS -->
                         </div>
                     </div>
+                    
+                    <div class="card-header" style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--card-border);">
+                        <h2><i class="fa-solid fa-cloud-arrow-up"></i> 一键批量分发归档</h2>
+                    </div>
+                    <div id="web-dropzone" onclick="document.getElementById('web-bulk-file-input').click()" style="border: 2px dashed var(--card-border); border-radius: 8px; padding: 1.25rem 0.5rem; text-align: center; cursor: pointer; transition: all 0.25s ease; background: rgba(0,0,0,0.15); margin-bottom: 0.5rem;">
+                        <i class="fa-solid fa-file-shield" style="font-size: 1.5rem; color: var(--text-muted); margin-bottom: 0.4rem; display: block;"></i>
+                        <span style="font-size: 0.78rem; color: var(--text-muted);">拖拽 2D图片/3D点云 文件至此处，或 <strong style="color: var(--primary);">点击上传</strong></span>
+                        <input type="file" id="web-bulk-file-input" multiple onchange="handleBulkFilesSelected()" style="display: none;">
+                    </div>
 
                     <div class="card-header" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--card-border);">
                         <h2><i class="fa-solid fa-calculator"></i> 三维点云处理控制台</h2>

@@ -287,6 +287,39 @@ def run_analysis():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class ScanRequest(BaseModel):
+    directory: str
+
+@app.post("/api/archive/scan")
+async def api_archive_scan(req: ScanRequest):
+    """Scans a local directory on the server and auto-archives matching files."""
+    result = gui_db.auto_archive_local_directory(req.directory)
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+@app.post("/api/archive/upload")
+async def api_archive_upload(files: List[UploadFile] = File(...)):
+    """Receives multiple uploaded files, archives them in a temp folder, distributes them, and cleans up."""
+    import tempfile
+    import shutil
+    
+    temp_dir = tempfile.mkdtemp()
+    try:
+        for f in files:
+            if not f.filename:
+                continue
+            temp_file_path = os.path.join(temp_dir, f.filename)
+            with open(temp_file_path, "wb") as buffer:
+                shutil.copyfileobj(f.file, buffer)
+        
+        result = gui_db.auto_archive_local_directory(temp_dir)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
 # Mount static files
 data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")

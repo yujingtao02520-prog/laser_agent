@@ -677,6 +677,12 @@ class MainWindow(QMainWindow):
         slots_scroll.setWidget(slots_content)
         left_layout.addWidget(slots_scroll)
         
+        # Add One-Click Auto Scan & Archive Button
+        self.btn_auto_scan = QPushButton("一键扫描归档本地文件")
+        self.btn_auto_scan.setObjectName("primaryButton")
+        self.btn_auto_scan.clicked.connect(self._on_auto_scan_clicked)
+        left_layout.addWidget(self.btn_auto_scan)
+        
         # Point Cloud processing controls
         proc_box = QGroupBox("三维点云处理控制台")
         proc_layout = QVBoxLayout(proc_box)
@@ -872,6 +878,38 @@ class MainWindow(QMainWindow):
             return
         self.current_pts = self.original_pts.copy()
         self._update_point_cloud_view()
+
+    def _on_auto_scan_clicked(self):
+        selected_dir = QFileDialog.getExistingDirectory(self, "选择存放2D图片和3D点云的文件夹")
+        if not selected_dir:
+            return
+            
+        res = gui_db.auto_archive_local_directory(selected_dir)
+        if res.get("status") == "error":
+            QMessageBox.critical(self, "归档失败", res.get("message", "未知错误"))
+            return
+            
+        count = res.get("archived_count", 0)
+        details = res.get("details", {})
+        
+        if count == 0:
+            QMessageBox.information(self, "扫描完成", "在该文件夹下未发现任何包含已知试验 ID 并且匹配名称关键字的 2D 或 3D 文件。")
+            return
+            
+        detail_lines = []
+        for eid, fields in details.items():
+            field_names_zh = []
+            for f in fields:
+                if "cloud" in f:
+                    field_names_zh.append("点云")
+                else:
+                    field_names_zh.append("图片")
+            detail_lines.append(f"• 试验 {eid}: 导入了 {len(fields)} 个文件 ({', '.join(field_names_zh)})")
+            
+        summary_msg = f"一键归档成功！\n共整理并关联了 {count} 个文件到数据库。\n\n" + "\n".join(detail_lines)
+        QMessageBox.information(self, "归档成功", summary_msg)
+        
+        self.refresh_data()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -517,5 +517,99 @@ def downsample_point_cloud(pts: np.ndarray, target_count: int = 5000) -> np.ndar
     step = n // target_count
     return pts[::step][:target_count]
 
+def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
+    """
+    Scans a local directory for files, automatically associates them to experiment IDs
+    and slot names based on filename patterns, archives them, and updates the DB.
+    """
+    if not src_dir or not os.path.exists(src_dir):
+        return {"status": "error", "message": f"目录 '{src_dir}' 不存在"}
+
+    # Get all active run IDs
+    runs = get_all_runs()
+    episode_ids = [r["episode_id"] for r in runs]
+    if not episode_ids:
+        return {"status": "error", "message": "数据库中尚无任何试验记录"}
+
+    # List all files in source folder
+    try:
+        all_files = [f for f in os.listdir(src_dir) if os.path.isfile(os.path.join(src_dir, f))]
+    except Exception as e:
+        return {"status": "error", "message": f"无法读取目录内容: {e}"}
+
+    pc_extensions = {".ply", ".pcd", ".xyz", ".pts", ".asc", ".csv"}
+    img_extensions = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"}
+
+    pc_mapping = {
+        "point_cloud_front": ["front", "qian", "qianqiemian", "1", "pc_front", "pc1"],
+        "point_cloud_back": ["back", "hou", "houqiemian", "2", "pc_back", "pc2"],
+        "point_cloud_left": ["left", "zuo", "zuoqiemian", "3", "pc_left", "pc3"],
+        "point_cloud_right": ["right", "you", "youqiemian", "4", "pc_right", "pc4"],
+        "point_cloud_dross": ["dross", "slag", "dizha", "guazha", "pc_dross", "pc5"]
+    }
+    
+    img_mapping = {
+        "image_front": ["front", "qian", "qianqiemian", "1", "img_front", "img1"],
+        "image_back": ["back", "hou", "houqiemian", "2", "img_back", "img2"],
+        "image_left": ["left", "zuo", "img_left", "img3"],
+        "image_right": ["right", "you", "img_right", "img4"],
+        "image_top": ["top", "shang", "img_top", "img5"],
+        "image_bottom": ["bottom", "xia", "img_bottom", "img6"]
+    }
+
+    archived_count = 0
+    details = {}
+
+    def normalize(s):
+        return "".join(c for c in s.lower() if c.isalnum())
+
+    # We match files to episode IDs
+    for filename in all_files:
+        ext = os.path.splitext(filename)[1].lower()
+        is_pc = ext in pc_extensions
+        is_img = ext in img_extensions
+        if not (is_pc or is_img):
+            continue
+
+        normalized_filename = normalize(filename)
+        
+        # Find which episode_id this file belongs to
+        matched_id = None
+        for eid in episode_ids:
+            if normalize(eid) in normalized_filename:
+                matched_id = eid
+                break
+
+        if not matched_id:
+            continue
+
+        # Check which slot it matches
+        mapping = pc_mapping if is_pc else img_mapping
+        matched_field = None
+        
+        # 1. Match by keyword list
+        for field, keywords in mapping.items():
+            if any(kw in normalized_filename for kw in keywords):
+                matched_field = field
+                break
+                
+        if not matched_field:
+            continue
+
+        # Execute archive copy
+        src_path = os.path.join(src_dir, filename)
+        rel_path = save_local_inspection_file(matched_id, matched_field, src_path)
+        if rel_path:
+            archived_count += 1
+            if matched_id not in details:
+                details[matched_id] = []
+            details[matched_id].append(matched_field)
+
+    return {
+        "status": "success",
+        "archived_count": archived_count,
+        "details": details
+    }
+
 # Initialize DB on load
 init_db()
