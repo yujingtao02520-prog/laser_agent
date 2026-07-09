@@ -541,16 +541,16 @@ def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
     img_extensions = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"}
 
     pc_mapping = {
-        "point_cloud_front": ["front", "qian", "qianqiemian", "1", "pc_front", "pc1", "01mian", "1mian"],
-        "point_cloud_back": ["back", "hou", "houqiemian", "2", "pc_back", "pc2", "02mian", "2mian"],
-        "point_cloud_left": ["left", "zuo", "zuoqiemian", "3", "pc_left", "pc3", "03mian", "3mian"],
-        "point_cloud_right": ["right", "you", "youqiemian", "4", "pc_right", "pc4", "04mian", "4mian"],
+        "point_cloud_front": ["front", "qian", "qianqiemian", "pc_front", "pc1", "01mian", "1mian"],
+        "point_cloud_back": ["back", "hou", "houqiemian", "pc_back", "pc2", "02mian", "2mian"],
+        "point_cloud_left": ["left", "zuo", "zuoqiemian", "pc_left", "pc3", "03mian", "3mian"],
+        "point_cloud_right": ["right", "you", "youqiemian", "pc_right", "pc4", "04mian", "4mian"],
         "point_cloud_dross": ["dross", "slag", "dizha", "guazha", "pc_dross", "pc5", "up", "shang"]
     }
     
     img_mapping = {
-        "image_front": ["front", "qian", "qianqiemian", "1", "img_front", "img1", "01mian", "1mian"],
-        "image_back": ["back", "hou", "houqiemian", "2", "img_back", "img2", "02mian", "2mian"],
+        "image_front": ["front", "qian", "qianqiemian", "img_front", "img1", "01mian", "1mian"],
+        "image_back": ["back", "hou", "houqiemian", "img_back", "img2", "02mian", "2mian"],
         "image_left": ["left", "zuo", "img_left", "img3", "03mian", "3mian"],
         "image_right": ["right", "you", "img_right", "img4", "04mian", "4mian"],
         "image_top": ["top", "shang", "img_top", "img5", "up"],
@@ -564,6 +564,7 @@ def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
         return "".join(c for c in s.lower() if c.isalnum())
 
     # We match files to episode IDs
+    import re
     for filename in all_files:
         ext = os.path.splitext(filename)[1].lower()
         is_pc = ext in pc_extensions
@@ -573,12 +574,42 @@ def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
 
         normalized_filename = normalize(filename)
         
-        # Find which episode_id this file belongs to
+        # 1. Try matching by block/trial number index (e.g. "01kuai" matches "SY-001-5-6-6")
         matched_id = None
-        for eid in episode_ids:
-            if normalize(eid) in normalized_filename:
-                matched_id = eid
-                break
+        
+        # Extract number from filename (e.g. "01" from "01kuai-01mian.pcd" -> 1)
+        file_num = None
+        m = re.search(r'(\d+)kuai', filename.lower())
+        if m:
+            file_num = int(m.group(1))
+            
+        if file_num is not None:
+            # Find the episode_id that has the matching sequence number
+            for eid in episode_ids:
+                eid_num = None
+                # Extract number from episode_id parts separated by hyphens (e.g. "001" from "SY-001-5-6-6" -> 1)
+                parts = eid.split("-")
+                if len(parts) >= 2 and parts[0].upper() == "SY":
+                    try:
+                        eid_num = int(parts[1])
+                    except ValueError:
+                        pass
+                if eid_num is None:
+                    # Fallback regex numeric extraction
+                    num_match = re.search(r'\d+', eid)
+                    if num_match:
+                        eid_num = int(num_match.group())
+                        
+                if eid_num == file_num:
+                    matched_id = eid
+                    break
+                    
+        # 2. Fallback to normal substring matching
+        if not matched_id:
+            for eid in episode_ids:
+                if normalize(eid) in normalized_filename:
+                    matched_id = eid
+                    break
 
         if not matched_id:
             continue
