@@ -771,13 +771,12 @@ async function viewInspectionFileInWeb(fieldKey, relPath, run) {
         // Fetch point cloud file content
         try {
             // Prepend relative path from FastAPI static root
-            const url = `/${relPath}`;
+            const url = `/api/experiments/${run.episode_id}/pointcloud?field=${fieldKey}`;
             const response = await fetch(url);
-            if (!response.ok) throw new Error('读取物理文件失败');
-            const text = await response.text();
+            if (!response.ok) throw new Error('从服务器获取点云数据失败');
+            const data = await response.json();
             
-            const ext = relPath.split('.').pop().toLowerCase();
-            originalPointsData = parsePointCloudData(text, ext);
+            originalPointsData = data.points.map(pt => ({ x: pt[0], y: pt[1], z: pt[2] }));
             currentPointsData = [...originalPointsData];
             
             document.getElementById('web-btn-denoise').disabled = false;

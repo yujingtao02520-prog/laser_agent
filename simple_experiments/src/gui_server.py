@@ -320,6 +320,26 @@ async def api_archive_upload(files: List[UploadFile] = File(...)):
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+@app.get("/api/experiments/{episode_id}/pointcloud")
+def get_experiment_pointcloud(episode_id: str, field: str):
+    """Loads, downsamples, and returns point cloud data for high-speed Web previewing."""
+    runs = gui_db.get_all_runs()
+    matched_run = next((r for r in runs if r["episode_id"] == episode_id), None)
+    if not matched_run:
+        raise HTTPException(status_code=404, detail="找不到该试验记录")
+        
+    rel_path = matched_run.get(field)
+    if not rel_path:
+        raise HTTPException(status_code=400, detail=f"该试验记录未绑定字段 {field}")
+        
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    abs_path = os.path.join(project_dir, rel_path)
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="找不到物理点云文件")
+        
+    pts = gui_db.parse_point_cloud(abs_path)
+    return {"points": pts.tolist()}
+
 # Mount static files
 data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")

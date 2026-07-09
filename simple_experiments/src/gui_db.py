@@ -435,69 +435,102 @@ def save_local_inspection_file(episode_id: str, field_name: str, src_path: str) 
 import numpy as np
 
 def parse_point_cloud(file_path: str) -> np.ndarray:
-    """Parses a 3D point cloud file (.pcd, .asc, .csv, .xyz, .ply) and returns (N, 3) float32 numpy array"""
+    """
+    Parses a 3D point cloud file (.pcd, .asc, .csv, .xyz, .ply) quickly using pandas
+    and automatically downsamples large point clouds to at most 20,000 points for stable previewing.
+    """
     if not os.path.exists(file_path):
         return np.zeros((0, 3), dtype=np.float32)
         
     ext = os.path.splitext(file_path)[1].lower()
-    points = []
+    points = None
     
     try:
         if ext == ".pcd":
-            # Simple PCD ASCII parser
+            # 1. Determine header size of PCD
+            header_lines = 0
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                header_ended = False
+                for line in f:
+                    header_lines += 1
+                    if line.strip().startswith("DATA ascii"):
+                        break
+            
+            # 2. Load data section using pandas read_csv (extremely fast)
+            df = pd.read_csv(file_path, skiprows=header_lines, sep=r"\s+", header=None, usecols=[0, 1, 2], dtype=np.float32)
+            points = df.to_numpy()
+            
+        elif ext == ".ply":
+            # 1. Determine header size of PLY
+            header_lines = 0
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    header_lines += 1
+                    if line.strip() == "end_header":
+                        break
+            
+            df = pd.read_csv(file_path, skiprows=header_lines, sep=r"\s+", header=None, usecols=[0, 1, 2], dtype=np.float32)
+            points = df.to_numpy()
+            
+        else:
+            # ASC / CSV / XYZ
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                first_line = f.readline()
+                
+            delim = None
+            for d in [",", ";", "\t"]:
+                if d in first_line:
+                    delim = d
+                    break
+            
+            sep = delim if delim else r"\s+"
+            
+            has_header = any(c.isalpha() for c in first_line.replace(",", "").replace(" ", "").strip())
+            header_val = 0 if has_header else None
+            
+            df = pd.read_csv(file_path, sep=sep, header=header_val, usecols=[0, 1, 2], dtype=np.float32)
+            points = df.to_numpy()
+            
+    except Exception as e:
+        print(f"[DB] Error parsing point cloud {file_path} via pandas: {e}")
+        # Fallback to standard line-by-line parsing if pandas fails
+        points = []
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                header_ended = (ext != ".pcd" and ext != ".ply")
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
                     if not header_ended:
-                        if line.startswith("DATA ascii"):
+                        if ext == ".pcd" and line.startswith("DATA ascii"):
                             header_ended = True
-                        continue
-                    # Parse data line
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        try:
-                            points.append([float(parts[0]), float(parts[1]), float(parts[2])])
-                        except ValueError:
-                            pass
-        else:
-            # ASC / CSV / XYZ / PLY parser
-            is_ply = (ext == ".ply")
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                header_ended = not is_ply
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if is_ply and not header_ended:
-                        if line == "end_header":
+                        elif ext == ".ply" and line == "end_header":
                             header_ended = True
                         continue
                     
-                    # Detect delimiter and split
-                    parts = []
-                    for delim in [",", ";", "\t"]:
-                        if delim in line:
-                            parts = line.split(delim)
-                            break
-                    if not parts:
-                        parts = line.split()
-                        
+                    parts = line.replace(",", " ").replace(";", " ").replace("\t", " ").split()
                     if len(parts) >= 3:
                         try:
                             points.append([float(parts[0]), float(parts[1]), float(parts[2])])
                         except ValueError:
                             pass
-                            
-    except Exception as e:
-        print(f"[DB] Error parsing point cloud {file_path}: {e}")
-        
-    if not points:
+            points = np.array(points, dtype=np.float32)
+        except Exception as fallback_err:
+            print(f"[DB] Fallback parser failed: {fallback_err}")
+            points = np.zeros((0, 3), dtype=np.float32)
+
+    if points is None or len(points) == 0:
         return np.zeros((0, 3), dtype=np.float32)
+
+    # AUTO DOWNSAMPLE: Limit points to at most 20,000
+    max_preview_points = 20000
+    n = len(points)
+    if n > max_preview_points:
+        step = n // max_preview_points
+        points = points[::step][:max_preview_points]
+        print(f"[PCD] Auto-downsampled large point cloud from {n:,} to {len(points):,} points.")
         
-    return np.array(points, dtype=np.float32)
+    return points
 
 def denoise_point_cloud(pts: np.ndarray) -> np.ndarray:
     """Filter outlier points that lie more than 3 standard deviations from the mean coordinate components"""
