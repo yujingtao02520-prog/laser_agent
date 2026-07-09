@@ -254,10 +254,35 @@
                             </div>
                         </div>
                     </div>
+                    <div style="display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.75rem;">
+                        <label for="web-core-ratio" style="white-space: nowrap; font-size: 0.82rem; color: var(--text-muted);">核心区域</label>
+                        <input type="range" id="web-core-ratio" min="10" max="100" step="5" value="50"
+                               oninput="document.getElementById('web-core-ratio-value').textContent = this.value + '%'"
+                               style="flex: 1;" disabled>
+                        <span id="web-core-ratio-value" style="min-width: 3rem; font-size: 0.82rem; color: var(--primary);">50%</span>
+                        <button class="btn btn-primary btn-sm" id="web-btn-extract-core"
+                                onclick="webExtractCoreRegion()" disabled>提取核心区域</button>
+                    </div>
+                    <button class="btn btn-primary btn-sm" id="web-btn-adaptive-core"
+                            onclick="webExtractAdaptiveCoreRegion()" style="width: 100%; margin-bottom: 0.75rem;" disabled>
+                        自适应识别并提取中心切面
+                    </button>
+                    <button class="btn btn-secondary-outline btn-sm" id="web-btn-remove-spikes"
+                            onclick="webRemoveFloatingSpikes()" style="width: 100%; margin-bottom: 0.75rem;" disabled>
+                        提取真实切面层（去底面/毛刺）
+                    </button>
                     <div style="display: flex; gap: 0.5rem; justify-content: space-between;">
                         <button class="btn btn-secondary-outline btn-sm" id="web-btn-denoise" onclick="webDenoisePointCloud()" style="flex: 1;" disabled>滤波降噪</button>
                         <button class="btn btn-secondary-outline btn-sm" id="web-btn-downsample" onclick="webDownsamplePointCloud()" style="flex: 1;" disabled>降采样(5k)</button>
                         <button class="btn btn-secondary-outline btn-sm" id="web-btn-reset" onclick="webResetPointCloud()" style="flex: 1;" disabled>重置</button>
+                    </div>
+                    <button class="btn btn-primary btn-sm" id="web-btn-morphology"
+                            onclick="webAnalyzeSurfaceMorphology()" style="width: 100%; margin-top: 0.75rem;" disabled>
+                        计算切面形貌
+                    </button>
+                    <div id="web-morphology-results"
+                         style="margin-top: 0.75rem; max-height: 240px; overflow-y: auto; font-size: 0.78rem; color: var(--text-muted);">
+                        提取真实切面后，可计算 Sa、Sq、Sz 等形貌指标
                     </div>
                 </section>
 

@@ -8,7 +8,15 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QColor, QFont, QMatrix4x4, QPainter
+from PyQt6.QtOpenGL import (
+    QOpenGLBuffer,
+    QOpenGLShader,
+    QOpenGLShaderProgram,
+    QOpenGLVersionFunctionsFactory,
+    QOpenGLVersionProfile,
+)
+from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -26,6 +34,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QSizePolicy,
     QSplitter,
     QTableWidget,
@@ -485,33 +494,140 @@ class ImageViewer(QScrollArea):
         else:
             super().mouseMoveEvent(event)
 
-class PointCloudViewer(QWidget):
+class PointCloudViewer(QOpenGLWidget):
+    GL_COLOR_BUFFER_BIT = 0x00004000
+    GL_DEPTH_BUFFER_BIT = 0x00000100
+    GL_DEPTH_TEST = 0x0B71
+    GL_PROGRAM_POINT_SIZE = 0x8642
+    GL_POINTS = 0x0000
+    GL_FLOAT = 0x1406
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.points = np.zeros((0, 3), dtype=np.float32)
-        self.points_centered = np.zeros((0, 3), dtype=np.float32)
+        self.gpu_points = np.zeros((0, 3), dtype=np.float32)
+        self.total_point_count = 0
+        self.render_point_count = 0
         self.theta = 0.5  # Yaw angle
         self.phi = 0.5    # Pitch angle
         self.zoom = 1.0
         self.last_mouse_pos = None
+        self.gl_functions = None
+        self.shader_program = None
+        self.vertex_buffer = None
+        self.gl_ready = False
+        self.gl_error = ""
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMinimumSize(300, 300)
         
     def set_points(self, pts: np.ndarray):
         self.points = pts
+        self.total_point_count = len(pts)
         if len(pts) > 0:
-            # Center the point cloud around its geometric mean
-            self.center = np.mean(pts, axis=0)
-            self.points_centered = pts - self.center
-            # Compute scaling factor to fit inside a unit cube
-            max_range = np.max(np.max(self.points_centered, axis=0) - np.min(self.points_centered, axis=0))
+            # Normalize once on CPU, then keep every extracted surface point in a GPU VBO.
+            point_min = np.min(pts, axis=0)
+            point_max = np.max(pts, axis=0)
+            center = (point_min + point_max) / 2.0
+            max_range = float(np.max(point_max - point_min))
             if max_range > 0:
-                self.points_centered = self.points_centered / max_range
+                self.gpu_points = np.ascontiguousarray(
+                    (pts - center) / max_range,
+                    dtype=np.float32,
+                )
             else:
-                self.points_centered = np.zeros_like(self.points_centered)
+                self.gpu_points = np.zeros_like(pts, dtype=np.float32)
+            self.render_point_count = len(self.gpu_points)
         else:
-            self.points_centered = np.zeros((0, 3), dtype=np.float32)
+            self.render_point_count = 0
+            self.gpu_points = np.zeros((0, 3), dtype=np.float32)
+
+        if self.gl_ready and self.isValid():
+            self.makeCurrent()
+            self._upload_points()
+            self.doneCurrent()
         self.update()
+
+    def initializeGL(self):
+        try:
+            version_profile = QOpenGLVersionProfile()
+            version_profile.setVersion(2, 0)
+            self.gl_functions = QOpenGLVersionFunctionsFactory.get(
+                version_profile,
+                self.context(),
+            )
+            if self.gl_functions is None:
+                raise RuntimeError("当前显卡驱动不支持 OpenGL 2.0")
+            self.gl_functions.initializeOpenGLFunctions()
+            self.gl_functions.glEnable(self.GL_DEPTH_TEST)
+            self.gl_functions.glEnable(self.GL_PROGRAM_POINT_SIZE)
+            self.gl_functions.glClearColor(15 / 255.0, 23 / 255.0, 42 / 255.0, 1.0)
+
+            self.shader_program = QOpenGLShaderProgram(self)
+            vertex_shader = """
+                #version 120
+                attribute vec3 position;
+                uniform mat4 mvp;
+                varying float depthColor;
+                void main() {
+                    gl_Position = mvp * vec4(position, 1.0);
+                    gl_PointSize = 2.0;
+                    depthColor = clamp(position.z + 0.5, 0.0, 1.0);
+                }
+            """
+            fragment_shader = """
+                #version 120
+                varying float depthColor;
+                void main() {
+                    vec3 cyan = vec3(56.0, 189.0, 248.0) / 255.0;
+                    vec3 purple = vec3(168.0, 85.0, 247.0) / 255.0;
+                    gl_FragColor = vec4(mix(cyan, purple, depthColor), 0.90);
+                }
+            """
+            if not self.shader_program.addShaderFromSourceCode(
+                QOpenGLShader.ShaderTypeBit.Vertex,
+                vertex_shader,
+            ):
+                raise RuntimeError(self.shader_program.log())
+            if not self.shader_program.addShaderFromSourceCode(
+                QOpenGLShader.ShaderTypeBit.Fragment,
+                fragment_shader,
+            ):
+                raise RuntimeError(self.shader_program.log())
+            self.shader_program.bindAttributeLocation("position", 0)
+            if not self.shader_program.link():
+                raise RuntimeError(self.shader_program.log())
+
+            self.vertex_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+            if not self.vertex_buffer.create():
+                raise RuntimeError("无法创建 OpenGL 点云缓冲区")
+            self.vertex_buffer.setUsagePattern(QOpenGLBuffer.UsagePattern.StaticDraw)
+            self.gl_ready = True
+            self._upload_points()
+            self.context().aboutToBeDestroyed.connect(self._cleanup_gl)
+        except Exception as exc:
+            self.gl_error = str(exc)
+            self.gl_ready = False
+
+    def _upload_points(self):
+        if not self.gl_ready or self.vertex_buffer is None:
+            return
+        if not self.vertex_buffer.bind():
+            self.gl_error = "无法绑定 OpenGL 点云缓冲区"
+            return
+        raw = self.gpu_points.tobytes(order="C")
+        self.vertex_buffer.allocate(raw, len(raw))
+        self.vertex_buffer.release()
+
+    def _cleanup_gl(self):
+        if not self.gl_ready:
+            return
+        self.makeCurrent()
+        if self.vertex_buffer is not None and self.vertex_buffer.isCreated():
+            self.vertex_buffer.destroy()
+        if self.shader_program is not None:
+            self.shader_program.removeAllShaders()
+        self.doneCurrent()
+        self.gl_ready = False
         
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -539,76 +655,51 @@ class PointCloudViewer(QWidget):
             self.zoom /= 1.15
         self.zoom = max(0.1, min(20.0, self.zoom))
         self.update()
-        
-    def paintEvent(self, event):
-        from PyQt6.QtGui import QPainter, QColor, QPen
-        from PyQt6.QtCore import QPointF
-        
+
+    def paintGL(self):
+        if self.gl_functions is None:
+            return
+        self.gl_functions.glEnable(self.GL_DEPTH_TEST)
+        self.gl_functions.glEnable(self.GL_PROGRAM_POINT_SIZE)
+        self.gl_functions.glClear(self.GL_COLOR_BUFFER_BIT | self.GL_DEPTH_BUFFER_BIT)
+
+        if self.gl_ready and self.render_point_count > 0:
+            aspect = self.width() / max(1.0, float(self.height()))
+            projection = QMatrix4x4()
+            if aspect >= 1.0:
+                projection.ortho(-aspect, aspect, -1.0, 1.0, -10.0, 10.0)
+            else:
+                projection.ortho(-1.0, 1.0, -1.0 / aspect, 1.0 / aspect, -10.0, 10.0)
+
+            model = QMatrix4x4()
+            model.scale(1.55 * self.zoom)
+            model.rotate(math.degrees(self.phi), 1.0, 0.0, 0.0)
+            model.rotate(math.degrees(self.theta), 0.0, 1.0, 0.0)
+            mvp = projection * model
+
+            self.shader_program.bind()
+            self.shader_program.setUniformValue("mvp", mvp)
+            self.vertex_buffer.bind()
+            self.shader_program.enableAttributeArray(0)
+            self.shader_program.setAttributeBuffer(0, self.GL_FLOAT, 0, 3, 12)
+            self.gl_functions.glDrawArrays(self.GL_POINTS, 0, self.render_point_count)
+            self.shader_program.disableAttributeArray(0)
+            self.vertex_buffer.release()
+            self.shader_program.release()
+
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        
-        # Slate 900 dark theme canvas
-        painter.fillRect(self.rect(), QColor(15, 23, 42))
-        
-        if len(self.points_centered) == 0:
+        painter.setPen(QColor(255, 255, 255, 160))
+        if self.gl_error:
+            painter.setPen(QColor(248, 113, 113))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, f"OpenGL 初始化失败：{self.gl_error}")
+        elif self.render_point_count == 0:
             painter.setPen(QColor(148, 163, 184))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "暂无三维点云数据或文件未归档")
-            return
-            
-        w = self.width()
-        h = self.height()
-        scale = min(w, h) * 0.7
-        
-        # Compute projection transformation
-        cos_t, sin_t = np.cos(self.theta), np.sin(self.theta)
-        cos_p, sin_p = np.cos(self.phi), np.sin(self.phi)
-        
-        xs = self.points_centered[:, 0]
-        ys = self.points_centered[:, 1]
-        zs = self.points_centered[:, 2]
-        
-        # Rotation around Y axis
-        x_rot = xs * cos_t + zs * sin_t
-        z_rot1 = -xs * sin_t + zs * cos_t
-        
-        # Rotation around X axis
-        y_rot = ys * cos_p - z_rot1 * sin_p
-        z_rot2 = ys * sin_p + z_rot1 * cos_p # Depth
-        
-        # Orthographic screen mapping
-        u_arr = w / 2.0 + x_rot * scale * self.zoom
-        v_arr = h / 2.0 - y_rot * scale * self.zoom
-        
-        # Render layers by depth (Painter's Algorithm)
-        num_layers = 8
-        if len(z_rot2) > 0:
-            indices = np.argsort(z_rot2)
-            chunk_size = len(indices) // num_layers + 1
-            
-            for i in range(num_layers):
-                start_idx = i * chunk_size
-                end_idx = min(start_idx + chunk_size, len(indices))
-                if start_idx >= end_idx:
-                    break
-                    
-                chunk_indices = indices[start_idx:end_idx]
-                
-                # Depth color gradient: Cyan (56, 189, 248) to Purple (168, 85, 247)
-                t = i / (num_layers - 1) if num_layers > 1 else 0.5
-                r = int(56 + (168 - 56) * t)
-                g = int(189 + (85 - 189) * t)
-                b = int(248 + (247 - 248) * t)
-                
-                painter.setPen(QPen(QColor(r, g, b, 210), 2))
-                
-                qpoints = [QPointF(u_arr[idx], v_arr[idx]) for idx in chunk_indices]
-                painter.drawPoints(qpoints)
-                
-        # Status overlay
-        painter.setPen(QColor(255, 255, 255, 140))
-        painter.drawText(15, 25, f"点数: {len(self.points_centered)}")
-        painter.drawText(15, 45, f"旋转: Yaw={self.theta:.2f}, Pitch={self.phi:.2f}")
-        painter.drawText(15, 65, f"缩放: {self.zoom:.2f}x (滚轮/滑动)")
+        else:
+            painter.drawText(15, 25, f"GPU 渲染点数: {self.render_point_count:,}")
+            painter.drawText(15, 45, f"旋转: Yaw={self.theta:.2f}, Pitch={self.phi:.2f}")
+            painter.drawText(15, 65, f"缩放: {self.zoom:.2f}x (滚轮/拖动)")
+        painter.end()
 
 
 class MainWindow(QMainWindow):
@@ -782,6 +873,34 @@ class MainWindow(QMainWindow):
         proc_layout.addWidget(self.lbl_bbox_x)
         proc_layout.addWidget(self.lbl_bbox_y)
         proc_layout.addWidget(self.lbl_bbox_z)
+
+        core_layout = QHBoxLayout()
+        core_layout.addWidget(QLabel("核心区域比例:"))
+        self.core_ratio_spin = QSpinBox()
+        self.core_ratio_spin.setRange(10, 100)
+        self.core_ratio_spin.setSingleStep(5)
+        self.core_ratio_spin.setValue(50)
+        self.core_ratio_spin.setSuffix("%")
+        self.core_ratio_spin.setEnabled(False)
+        core_layout.addWidget(self.core_ratio_spin)
+        self.btn_extract_core = QPushButton("提取核心区域")
+        self.btn_extract_core.setObjectName("primaryButton")
+        self.btn_extract_core.setEnabled(False)
+        self.btn_extract_core.clicked.connect(self._on_extract_core_clicked)
+        core_layout.addWidget(self.btn_extract_core, stretch=1)
+        proc_layout.addLayout(core_layout)
+
+        self.btn_adaptive_core = QPushButton("自适应识别并提取中心切面")
+        self.btn_adaptive_core.setObjectName("primaryButton")
+        self.btn_adaptive_core.setEnabled(False)
+        self.btn_adaptive_core.clicked.connect(self._on_adaptive_core_clicked)
+        proc_layout.addWidget(self.btn_adaptive_core)
+
+        self.btn_remove_spikes = QPushButton("提取真实切面层（去底面/毛刺）")
+        self.btn_remove_spikes.setObjectName("ghostButton")
+        self.btn_remove_spikes.setEnabled(False)
+        self.btn_remove_spikes.clicked.connect(self._on_remove_spikes_clicked)
+        proc_layout.addWidget(self.btn_remove_spikes)
         
         btn_layout = QHBoxLayout()
         self.btn_denoise = QPushButton("滤波降噪")
@@ -803,6 +922,18 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.btn_downsample)
         btn_layout.addWidget(self.btn_reset_pc)
         proc_layout.addLayout(btn_layout)
+
+        self.btn_analyze_surface = QPushButton("计算切面形貌")
+        self.btn_analyze_surface.setObjectName("primaryButton")
+        self.btn_analyze_surface.setEnabled(False)
+        self.btn_analyze_surface.clicked.connect(self._on_analyze_surface_clicked)
+        proc_layout.addWidget(self.btn_analyze_surface)
+
+        self.morphology_output = QTextEdit()
+        self.morphology_output.setReadOnly(True)
+        self.morphology_output.setMaximumHeight(190)
+        self.morphology_output.setPlaceholderText("提取真实切面后，可计算 Sa、Sq、Sz 等形貌指标")
+        proc_layout.addWidget(self.morphology_output)
         
         left_layout.addWidget(proc_box)
         
@@ -900,10 +1031,19 @@ class MainWindow(QMainWindow):
         if "cloud" in field_key:
             self.original_pts = gui_db.parse_point_cloud(abs_path)
             self.current_pts = self.original_pts.copy()
+            self.full_surface_result = None
             
             self.btn_denoise.setEnabled(True)
             self.btn_downsample.setEnabled(True)
             self.btn_reset_pc.setEnabled(True)
+            self.core_ratio_spin.setEnabled(True)
+            self.btn_extract_core.setEnabled(True)
+            self.btn_adaptive_core.setEnabled(True)
+            self.btn_adaptive_core.setText("自适应识别并提取中心切面")
+            self.btn_remove_spikes.setEnabled(True)
+            self.btn_remove_spikes.setText("提取真实切面层（去底面/毛刺）")
+            self.btn_analyze_surface.setEnabled(True)
+            self.morphology_output.clear()
             
             self.stacked_view.setCurrentIndex(1) # PointCloudViewer
             self._update_point_cloud_view()
@@ -911,6 +1051,12 @@ class MainWindow(QMainWindow):
             self.btn_denoise.setEnabled(False)
             self.btn_downsample.setEnabled(False)
             self.btn_reset_pc.setEnabled(False)
+            self.core_ratio_spin.setEnabled(False)
+            self.btn_extract_core.setEnabled(False)
+            self.btn_adaptive_core.setEnabled(False)
+            self.btn_remove_spikes.setEnabled(False)
+            self.btn_analyze_surface.setEnabled(False)
+            self.morphology_output.clear()
             
             self.lbl_points_count.setText("点数: --")
             self.lbl_bbox_x.setText("X 尺寸 (宽): --")
@@ -948,10 +1094,102 @@ class MainWindow(QMainWindow):
         self.current_pts = gui_db.downsample_point_cloud(self.current_pts, target_count=5000)
         self._update_point_cloud_view()
 
+    def _on_extract_core_clicked(self):
+        if not hasattr(self, 'original_pts') or len(self.original_pts) == 0:
+            return
+        keep_ratio = self.core_ratio_spin.value() / 100.0
+        core_pts = gui_db.extract_core_region(self.original_pts, keep_ratio)
+        if len(core_pts) == 0:
+            QMessageBox.warning(
+                self,
+                "核心区域为空",
+                "当前比例内没有点，请增大核心区域比例后重试。",
+            )
+            return
+        self.current_pts = core_pts
+        self._update_point_cloud_view()
+
+    def _on_adaptive_core_clicked(self):
+        if (
+            not hasattr(self, 'original_pts')
+            or len(self.original_pts) == 0
+            or not hasattr(self, 'current_file_path')
+        ):
+            return
+
+        self.btn_adaptive_core.setEnabled(False)
+        self.btn_adaptive_core.setText("正在从原始点云提取完整切面…")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
+        try:
+            result = gui_db.extract_full_resolution_surface(
+                self.current_file_path,
+                self.original_pts,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "原始切面提取失败", str(exc))
+            self.btn_adaptive_core.setText("自适应识别并提取中心切面")
+            self.btn_adaptive_core.setEnabled(True)
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self.current_pts = result["surface_points"]
+        self.full_surface_result = result
+        self._update_point_cloud_view()
+        self.btn_adaptive_core.setText(
+            f"完整切面：{result['surface_point_count']:,} / "
+            f"{result['source_point_count']:,} 点"
+        )
+        self.btn_adaptive_core.setEnabled(True)
+        removed = result["roi_point_count"] - result["surface_point_count"]
+        self.btn_remove_spikes.setText(f"已剔除 {removed:,} 个底面/毛刺点")
+        self.btn_remove_spikes.setEnabled(False)
+        self._on_analyze_surface_clicked()
+
+    def _on_remove_spikes_clicked(self):
+        if not hasattr(self, 'current_pts') or len(self.current_pts) == 0:
+            return
+        before = len(self.current_pts)
+        self.current_pts = gui_db.extract_connected_surface_layer(self.current_pts)
+        removed = before - len(self.current_pts)
+        self.btn_remove_spikes.setText(f"已剔除 {removed} 个底面/毛刺点")
+        self.btn_remove_spikes.setEnabled(False)
+        self._update_point_cloud_view()
+        self._on_analyze_surface_clicked()
+
+    def _on_analyze_surface_clicked(self):
+        if not hasattr(self, 'current_pts') or len(self.current_pts) < 3:
+            return
+        try:
+            result = gui_db.analyze_surface_morphology(self.current_pts)
+        except Exception as exc:
+            QMessageBox.warning(self, "形貌计算失败", str(exc))
+            return
+
+        lines = [f"有效点数：{result['point_count']:,}"]
+        for item in result["metrics"]:
+            unit = f" {item['unit']}" if item["unit"] else ""
+            lines.append(f"{item['label']}：{item['value']}{unit}")
+        plane = result["reference_plane"]
+        lines.extend(
+            [
+                f"基准面倾角 X/Y：{plane['slope_x_deg']:.4f}° / {plane['slope_y_deg']:.4f}°",
+                "",
+                result["note"],
+            ]
+        )
+        self.morphology_output.setPlainText("\n".join(lines))
+
     def _on_reset_pc_clicked(self):
         if not hasattr(self, 'original_pts') or len(self.original_pts) == 0:
             return
         self.current_pts = self.original_pts.copy()
+        self.full_surface_result = None
+        self.btn_adaptive_core.setText("自适应识别并提取中心切面")
+        self.btn_remove_spikes.setText("提取真实切面层（去底面/毛刺）")
+        self.btn_remove_spikes.setEnabled(True)
+        self.morphology_output.clear()
         self._update_point_cloud_view()
 
     def _on_auto_scan_clicked(self):
@@ -1422,7 +1660,7 @@ def apply_theme(app: QApplication):
             border: 1px solid #263449;
             border-radius: 8px;
         }
-        QLineEdit, QDoubleSpinBox, QComboBox, QTextEdit {
+        QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox, QTextEdit {
             background: #0b1220;
             color: #e2e8f0;
             border: 1px solid #334155;
@@ -1431,7 +1669,7 @@ def apply_theme(app: QApplication):
             selection-background-color: #2563eb;
             selection-color: #ffffff;
         }
-        QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus, QTextEdit:focus {
+        QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus, QTextEdit:focus {
             border-color: #38bdf8;
         }
         QComboBox QAbstractItemView {

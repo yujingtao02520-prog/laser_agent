@@ -2,6 +2,7 @@ import os
 import sys
 import webbrowser
 import pandas as pd
+import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -339,6 +340,49 @@ def get_experiment_pointcloud(episode_id: str, field: str):
         
     pts = gui_db.parse_point_cloud(abs_path)
     return {"points": pts.tolist()}
+
+@app.post("/api/surface/morphology")
+def analyze_surface_morphology(points: List[List[float]]):
+    """Calculate morphology metrics for the point cloud currently shown in the UI."""
+    try:
+        pts = np.asarray(points, dtype=np.float32)
+        return gui_db.analyze_surface_morphology(pts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/experiments/{episode_id}/surface-process")
+def process_full_resolution_surface(episode_id: str, field: str):
+    """Extract and analyze the original-resolution surface, returning a safe render sample."""
+    runs = gui_db.get_all_runs()
+    matched_run = next((r for r in runs if r["episode_id"] == episode_id), None)
+    if not matched_run:
+        raise HTTPException(status_code=404, detail="找不到该试验记录")
+    rel_path = matched_run.get(field)
+    if not rel_path or "point_cloud" not in field:
+        raise HTTPException(status_code=400, detail="请选择有效的点云字段")
+
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    abs_path = os.path.join(project_dir, rel_path)
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="找不到物理点云文件")
+
+    try:
+        result = gui_db.extract_full_resolution_surface(abs_path)
+        surface = result.pop("surface_points")
+        morphology = gui_db.analyze_surface_morphology(surface)
+        display_points = gui_db.downsample_point_cloud(surface, target_count=100_000)
+        return {
+            **result,
+            "render_point_count": int(len(display_points)),
+            "display_points": display_points.tolist(),
+            "morphology": morphology,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 # Mount static files
 data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")

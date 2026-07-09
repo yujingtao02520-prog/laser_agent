@@ -446,30 +446,44 @@ def parse_point_cloud(file_path: str) -> np.ndarray:
     points = None
     
     try:
-        if ext == ".pcd":
-            # 1. Determine header size of PCD
-            header_lines = 0
+        if ext in {".pcd", ".ply"}:
+            declared_count = 0
+            count_prefix = "POINTS" if ext == ".pcd" else "element vertex"
+            terminator = "DATA ascii" if ext == ".pcd" else "end_header"
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
-                    header_lines += 1
-                    if line.strip().startswith("DATA ascii"):
+                    stripped = line.strip()
+                    if stripped.lower().startswith(count_prefix.lower()):
+                        try:
+                            declared_count = int(stripped.split()[-1])
+                        except ValueError:
+                            pass
+                    if stripped.lower() == terminator.lower():
                         break
-            
-            # 2. Load data section using pandas read_csv (extremely fast)
-            df = pd.read_csv(file_path, skiprows=header_lines, sep=r"\s+", header=None, usecols=[0, 1, 2], dtype=np.float32)
-            points = df.to_numpy()
-            
-        elif ext == ".ply":
-            # 1. Determine header size of PLY
-            header_lines = 0
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    header_lines += 1
-                    if line.strip() == "end_header":
-                        break
-            
-            df = pd.read_csv(file_path, skiprows=header_lines, sep=r"\s+", header=None, usecols=[0, 1, 2], dtype=np.float32)
-            points = df.to_numpy()
+
+            max_preview_points = 20_000
+            step = max(1, declared_count // max_preview_points)
+            sampled_chunks = []
+            offset = 0
+            for chunk in iter_point_cloud_chunks(file_path):
+                if step > 1:
+                    indices = np.arange(len(chunk), dtype=np.int64) + offset
+                    sampled = chunk[(indices % step) == 0]
+                else:
+                    sampled = chunk
+                if len(sampled):
+                    sampled_chunks.append(sampled)
+                offset += len(chunk)
+            points = (
+                np.concatenate(sampled_chunks)[:max_preview_points]
+                if sampled_chunks
+                else np.zeros((0, 3), dtype=np.float32)
+            )
+            if declared_count > max_preview_points:
+                print(
+                    f"[PCD] Stream-sampled large point cloud from "
+                    f"{declared_count:,} to {len(points):,} preview points."
+                )
             
         else:
             # ASC / CSV / XYZ
@@ -532,6 +546,125 @@ def parse_point_cloud(file_path: str) -> np.ndarray:
         
     return points
 
+def iter_point_cloud_chunks(file_path: str, chunk_size: int = 500_000):
+    """Yield full-resolution XYZ chunks without loading the entire file."""
+    ext = os.path.splitext(file_path)[1].lower()
+    skip_rows = 0
+    separator = r"\s+"
+    engine = "c"
+
+    if ext in {".pcd", ".ply"}:
+        terminator = "DATA ascii" if ext == ".pcd" else "end_header"
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                skip_rows += 1
+                if line.strip().lower() == terminator.lower():
+                    break
+        if skip_rows == 0:
+            raise ValueError(f"无法识别点云文件头: {file_path}")
+    else:
+        separator = r"[\s,;\t]+"
+        engine = "python"
+
+    reader = pd.read_csv(
+        file_path,
+        skiprows=skip_rows,
+        sep=separator,
+        engine=engine,
+        header=None,
+        usecols=[0, 1, 2],
+        chunksize=chunk_size,
+        on_bad_lines="skip",
+    )
+    for chunk in reader:
+        numeric = chunk.apply(pd.to_numeric, errors="coerce").dropna()
+        if not numeric.empty:
+            yield numeric.to_numpy(dtype=np.float32, copy=False)
+
+def extract_full_resolution_surface(
+    file_path: str,
+    preview_points: Optional[np.ndarray] = None,
+) -> Dict[str, Any]:
+    """
+    Extract the original-resolution center surface in a memory-safe second pass.
+
+    The lightweight preview determines the X/Y ROI and surface-height model.
+    The source file is then streamed in chunks, retaining every original point
+    that belongs to that surface layer.
+    """
+    if preview_points is None or len(preview_points) < 100:
+        preview_points = parse_point_cloud(file_path)
+    if len(preview_points) < 100:
+        raise ValueError("预览点不足，无法确定原始切面范围")
+
+    preview_roi = extract_adaptive_core_region(preview_points)
+    preview_surface = extract_connected_surface_layer(preview_roi)
+    if len(preview_surface) < 30:
+        raise ValueError("未能从预览点云中识别稳定的中心切面")
+
+    xy_min = np.min(preview_roi[:, :2], axis=0)
+    xy_max = np.max(preview_roi[:, :2], axis=0)
+    preview_analysis = analyze_surface_morphology(preview_surface)
+    plane = preview_analysis["reference_plane"]
+    coeffs = np.asarray([plane["a"], plane["b"], plane["c"]], dtype=np.float64)
+    preview_residual = preview_surface[:, 2] - (
+        coeffs[0] * preview_surface[:, 0]
+        + coeffs[1] * preview_surface[:, 1]
+        + coeffs[2]
+    )
+    residual_center = float(np.median(preview_residual))
+    residual_mad = float(
+        np.median(np.abs(preview_residual - residual_center)) * 1.4826
+    )
+    margin = max(0.15, 3.0 * residual_mad)
+    residual_low = float(np.percentile(preview_residual, 0.1) - margin)
+    residual_high = float(np.percentile(preview_residual, 99.9) + margin)
+
+    surface_chunks = []
+    source_count = 0
+    roi_count = 0
+    for chunk in iter_point_cloud_chunks(file_path):
+        source_count += len(chunk)
+        roi_mask = (
+            (chunk[:, 0] >= xy_min[0])
+            & (chunk[:, 0] <= xy_max[0])
+            & (chunk[:, 1] >= xy_min[1])
+            & (chunk[:, 1] <= xy_max[1])
+        )
+        roi_chunk = chunk[roi_mask]
+        roi_count += len(roi_chunk)
+        if len(roi_chunk) == 0:
+            continue
+        residual = roi_chunk[:, 2] - (
+            coeffs[0] * roi_chunk[:, 0]
+            + coeffs[1] * roi_chunk[:, 1]
+            + coeffs[2]
+        )
+        layer_mask = (residual >= residual_low) & (residual <= residual_high)
+        if np.any(layer_mask):
+            surface_chunks.append(roi_chunk[layer_mask])
+
+    if not surface_chunks:
+        raise ValueError("原始点云中没有找到与预览切面匹配的高度层")
+    surface = np.concatenate(surface_chunks).astype(np.float32, copy=False)
+    return {
+        "surface_points": surface,
+        "source_point_count": int(source_count),
+        "roi_point_count": int(roi_count),
+        "surface_point_count": int(len(surface)),
+        "preview_surface_point_count": int(len(preview_surface)),
+        "xy_bounds": {
+            "x_min": float(xy_min[0]),
+            "x_max": float(xy_max[0]),
+            "y_min": float(xy_min[1]),
+            "y_max": float(xy_max[1]),
+        },
+        "residual_band_mm": {
+            "low": residual_low,
+            "high": residual_high,
+        },
+    }
+
 def denoise_point_cloud(pts: np.ndarray) -> np.ndarray:
     """Filter outlier points that lie more than 3 standard deviations from the mean coordinate components"""
     if len(pts) < 10:
@@ -549,6 +682,532 @@ def downsample_point_cloud(pts: np.ndarray, target_count: int = 5000) -> np.ndar
         return pts
     step = n // target_count
     return pts[::step][:target_count]
+
+def extract_core_region(pts: np.ndarray, keep_ratio: float = 0.5) -> np.ndarray:
+    """
+    Extract the centered region of a section point cloud.
+
+    Cropping is applied to the X/Y section plane while the full Z depth is
+    retained, so surface-height information is not discarded.
+    """
+    if pts is None or len(pts) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        raise ValueError("点云数据必须是包含 X、Y、Z 的二维数组")
+    if not 0.0 < keep_ratio <= 1.0:
+        raise ValueError("核心区域保留比例必须在 0 到 1 之间")
+
+    xy = pts[:, :2]
+    xy_min = np.min(xy, axis=0)
+    xy_max = np.max(xy, axis=0)
+    center = (xy_min + xy_max) / 2.0
+    half_size = (xy_max - xy_min) * keep_ratio / 2.0
+    lower = center - half_size
+    upper = center + half_size
+    mask = np.all((xy >= lower) & (xy <= upper), axis=1)
+    return pts[mask].copy()
+
+def _extract_density_core_region(pts: np.ndarray, bins: int = 64) -> np.ndarray:
+    """
+    Detect a centered, high-density section region in the X/Y projection.
+
+    Each axis is converted to a smoothed density profile. Starting from the
+    strongest bin near the geometric center, the algorithm expands through
+    the contiguous dense interval and combines the detected X/Y bounds.
+    Z is deliberately not cropped.
+    """
+    if pts is None or len(pts) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        raise ValueError("点云数据必须是包含 X、Y、Z 的二维数组")
+
+    finite_pts = pts[np.all(np.isfinite(pts[:, :3]), axis=1)]
+    if len(finite_pts) < 30:
+        return finite_pts.copy()
+
+    bounds = []
+    bins = max(16, min(int(bins), 256))
+    for axis in (0, 1):
+        values = finite_pts[:, axis]
+        robust_min, robust_max = np.percentile(values, [0.5, 99.5])
+        if robust_max <= robust_min:
+            bounds.append((robust_min, robust_max))
+            continue
+
+        hist, edges = np.histogram(values, bins=bins, range=(robust_min, robust_max))
+        smooth = np.convolve(hist.astype(float), np.ones(5) / 5.0, mode="same")
+
+        center_idx = bins // 2
+        search_radius = max(2, bins // 6)
+        search_start = max(0, center_idx - search_radius)
+        search_end = min(bins, center_idx + search_radius + 1)
+        seed_idx = search_start + int(np.argmax(smooth[search_start:search_end]))
+        seed_density = smooth[seed_idx]
+
+        positive = smooth[smooth > 0]
+        if seed_density <= 0 or len(positive) == 0:
+            bounds.append((robust_min, robust_max))
+            continue
+
+        density_floor = float(np.percentile(positive, 50))
+        threshold = min(max(seed_density * 0.25, density_floor), seed_density * 0.8)
+
+        left = seed_idx
+        right = seed_idx
+        while left > 0 and smooth[left - 1] >= threshold:
+            left -= 1
+        while right < bins - 1 and smooth[right + 1] >= threshold:
+            right += 1
+
+        # Include one boundary bin to avoid cutting points on the detected edge.
+        left = max(0, left - 1)
+        right = min(bins - 1, right + 1)
+        bounds.append((edges[left], edges[right + 1]))
+
+    mask = (
+        (finite_pts[:, 0] >= bounds[0][0])
+        & (finite_pts[:, 0] <= bounds[0][1])
+        & (finite_pts[:, 1] >= bounds[1][0])
+        & (finite_pts[:, 1] <= bounds[1][1])
+    )
+    core = finite_pts[mask]
+
+    # Sparse or fragmented clouds can make density detection too restrictive.
+    # Fall back to a robust centered box instead of returning an unusable ROI.
+    if len(core) < max(10, int(len(finite_pts) * 0.05)):
+        xy_min = np.percentile(finite_pts[:, :2], 20, axis=0)
+        xy_max = np.percentile(finite_pts[:, :2], 80, axis=0)
+        fallback_mask = np.all(
+            (finite_pts[:, :2] >= xy_min) & (finite_pts[:, :2] <= xy_max),
+            axis=1,
+        )
+        core = finite_pts[fallback_mask]
+
+    return core.copy()
+
+def extract_adaptive_core_region(pts: np.ndarray, bins: int = 64) -> np.ndarray:
+    """
+    Extract the centered section by its height difference from the background.
+
+    A robust plane is fitted to the outer frame of the cloud first. The
+    residual height profiles along X and Y are then used to find the
+    contiguous elevated or recessed interval around the center. Density-based
+    extraction is retained as a fallback for clouds without a clear height
+    contrast.
+    """
+    if pts is None or len(pts) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        raise ValueError("点云数据必须是包含 X、Y、Z 的二维数组")
+
+    finite_pts = pts[np.all(np.isfinite(pts[:, :3]), axis=1)]
+    if len(finite_pts) < 100:
+        return finite_pts.copy()
+
+    bins = max(24, min(int(bins), 256))
+    xy = finite_pts[:, :2].astype(np.float64)
+    z = finite_pts[:, 2].astype(np.float64)
+    xy_min = np.percentile(xy, 0.5, axis=0)
+    xy_max = np.percentile(xy, 99.5, axis=0)
+    xy_range = xy_max - xy_min
+    if np.any(xy_range <= 0):
+        return _extract_density_core_region(finite_pts, bins)
+
+    normalized = (xy - xy_min) / xy_range
+    outer_mask = np.any((normalized <= 0.15) | (normalized >= 0.85), axis=1)
+    if np.count_nonzero(outer_mask) < 30:
+        return _extract_density_core_region(finite_pts, bins)
+
+    # Robustly fit z = ax + by + c to the outer frame.
+    outer_xy = xy[outer_mask]
+    outer_z = z[outer_mask]
+    design = np.column_stack((outer_xy, np.ones(len(outer_xy))))
+    coeffs, *_ = np.linalg.lstsq(design, outer_z, rcond=None)
+    for _ in range(2):
+        fit_error = outer_z - design @ coeffs
+        error_center = np.median(fit_error)
+        error_mad = np.median(np.abs(fit_error - error_center))
+        if error_mad <= 1e-9:
+            break
+        inliers = np.abs(fit_error - error_center) <= 3.5 * 1.4826 * error_mad
+        if np.count_nonzero(inliers) < 30:
+            break
+        coeffs, *_ = np.linalg.lstsq(design[inliers], outer_z[inliers], rcond=None)
+
+    residual = z - (
+        coeffs[0] * xy[:, 0] + coeffs[1] * xy[:, 1] + coeffs[2]
+    )
+    outer_residual = residual[outer_mask]
+    background_center = float(np.median(outer_residual))
+    background_mad = float(
+        np.median(np.abs(outer_residual - background_center)) * 1.4826
+    )
+    residual -= background_center
+
+    center_mask = np.all((normalized >= 0.38) & (normalized <= 0.62), axis=1)
+    if np.count_nonzero(center_mask) < 10:
+        return _extract_density_core_region(finite_pts, bins)
+    center_height = float(np.median(residual[center_mask]))
+    min_contrast = max(background_mad * 6.0, 0.05)
+    if abs(center_height) < min_contrast:
+        return _extract_density_core_region(finite_pts, bins)
+
+    direction = 1.0 if center_height >= 0 else -1.0
+    signed_height = direction * residual
+    clip_low, clip_high = np.percentile(signed_height, [1, 99])
+    signed_height = np.clip(signed_height, clip_low, clip_high)
+
+    detected_bounds = []
+    for axis in (0, 1):
+        indices = np.floor(normalized[:, axis] * bins).astype(int)
+        indices = np.clip(indices, 0, bins - 1)
+        sums = np.bincount(indices, weights=signed_height, minlength=bins)
+        counts = np.bincount(indices, minlength=bins)
+        profile = np.divide(
+            sums,
+            counts,
+            out=np.zeros(bins, dtype=float),
+            where=counts > 0,
+        )
+        profile = np.convolve(profile, np.ones(3) / 3.0, mode="same")
+
+        center_idx = bins // 2
+        search_radius = max(2, bins // 6)
+        start = max(0, center_idx - search_radius)
+        end = min(bins, center_idx + search_radius + 1)
+        seed = start + int(np.argmax(profile[start:end]))
+        seed_height = float(profile[seed])
+        threshold = max(background_mad * 4.0, seed_height * 0.40)
+        if seed_height <= threshold:
+            return _extract_density_core_region(finite_pts, bins)
+
+        left = seed
+        right = seed
+        while left > 0 and profile[left - 1] >= threshold:
+            left -= 1
+        while right < bins - 1 and profile[right + 1] >= threshold:
+            right += 1
+
+        bin_width = xy_range[axis] / bins
+        detected_bounds.append(
+            (
+                xy_min[axis] + left * bin_width,
+                xy_min[axis] + (right + 1) * bin_width,
+            )
+        )
+
+    core_mask = (
+        (xy[:, 0] >= detected_bounds[0][0])
+        & (xy[:, 0] <= detected_bounds[0][1])
+        & (xy[:, 1] >= detected_bounds[1][0])
+        & (xy[:, 1] <= detected_bounds[1][1])
+    )
+    core = finite_pts[core_mask]
+    if len(core) < max(10, int(len(finite_pts) * 0.01)):
+        return _extract_density_core_region(finite_pts, bins)
+    return core.copy()
+
+def _remove_floating_spikes_local(
+    pts: np.ndarray,
+    sigma_threshold: float = 8.0,
+    min_height_mm: float = 0.5,
+) -> np.ndarray:
+    """
+    Remove isolated points floating above their local X/Y neighborhood.
+
+    Only positive Z outliers are removed. The cutoff is the larger of an
+    absolute height threshold and a robust MAD-based noise threshold, which
+    preserves normal surface texture and recessed defects.
+    """
+    if pts is None or len(pts) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        raise ValueError("点云数据必须是包含 X、Y、Z 的二维数组")
+    if len(pts) < 20:
+        return pts.copy()
+
+    finite_mask = np.all(np.isfinite(pts[:, :3]), axis=1)
+    finite_pts = pts[finite_mask]
+    if len(finite_pts) < 20:
+        return finite_pts.copy()
+
+    xy = finite_pts[:, :2].astype(np.float64)
+    xy_min = np.min(xy, axis=0)
+    xy_span = np.max(xy, axis=0) - xy_min
+    max_span = float(np.max(xy_span))
+    if max_span <= 0:
+        return finite_pts.copy()
+
+    # Aim for roughly eight points per cell before collecting a 3x3
+    # neighborhood. Aspect-aware dimensions also support rectangular cuts.
+    target = max(4, int(np.sqrt(len(finite_pts) / 8.0)))
+    grid_x = max(4, int(round(target * xy_span[0] / max_span)))
+    grid_y = max(4, int(round(target * xy_span[1] / max_span)))
+    x_index = np.clip(
+        ((xy[:, 0] - xy_min[0]) / max(xy_span[0], 1e-9) * grid_x).astype(int),
+        0,
+        grid_x - 1,
+    )
+    y_index = np.clip(
+        ((xy[:, 1] - xy_min[1]) / max(xy_span[1], 1e-9) * grid_y).astype(int),
+        0,
+        grid_y - 1,
+    )
+
+    cells: Dict[tuple, List[int]] = {}
+    for index, key in enumerate(zip(x_index, y_index)):
+        cells.setdefault(key, []).append(index)
+
+    local_median = finite_pts[:, 2].astype(np.float64).copy()
+    for key, indices in cells.items():
+        neighbor_indices = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                neighbor_indices.extend(cells.get((key[0] + dx, key[1] + dy), []))
+        if len(neighbor_indices) >= 6:
+            local_median[indices] = np.median(finite_pts[neighbor_indices, 2])
+
+    residual = finite_pts[:, 2] - local_median
+    residual_center = float(np.median(residual))
+    noise_mad = float(
+        np.median(np.abs(residual - residual_center)) * 1.4826
+    )
+    cutoff = max(float(min_height_mm), float(sigma_threshold) * noise_mad)
+    keep = residual <= cutoff
+    return finite_pts[keep].copy()
+
+def extract_connected_surface_layer(pts: np.ndarray) -> np.ndarray:
+    """
+    Keep the center-seeded, height-continuous surface layer.
+
+    The cloud is divided into an X/Y grid. Region growing starts from the
+    center surface and only enters neighboring cells with continuous median
+    height. Points outside the connected layer, below the surface, or floating
+    above their cell are removed. Original coordinates are never modified.
+    """
+    if pts is None or len(pts) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        raise ValueError("点云数据必须是包含 X、Y、Z 的二维数组")
+    if len(pts) < 30:
+        return pts.copy()
+
+    finite_pts = pts[np.all(np.isfinite(pts[:, :3]), axis=1)]
+    if len(finite_pts) < 30:
+        return finite_pts.copy()
+
+    xy = finite_pts[:, :2].astype(np.float64)
+    z = finite_pts[:, 2].astype(np.float64)
+    xy_min = np.min(xy, axis=0)
+    xy_span = np.max(xy, axis=0) - xy_min
+    max_span = float(np.max(xy_span))
+    if max_span <= 0:
+        return _remove_floating_spikes_local(finite_pts)
+
+    normalized = (xy - xy_min) / np.maximum(xy_span, 1e-9)
+    center_mask = np.all((normalized >= 0.35) & (normalized <= 0.65), axis=1)
+    if np.count_nonzero(center_mask) < 10:
+        return _remove_floating_spikes_local(finite_pts)
+
+    center_height = float(np.median(z[center_mask]))
+    center_mad = float(
+        np.median(np.abs(z[center_mask] - center_height)) * 1.4826
+    )
+    neighbor_tolerance = max(0.6, 8.0 * center_mad)
+    layer_tolerance = max(1.2, 12.0 * center_mad)
+    point_tolerance = max(0.5, 8.0 * center_mad)
+
+    target = max(6, int(np.sqrt(len(finite_pts) / 4.0)))
+    grid_x = max(6, int(round(target * xy_span[0] / max_span)))
+    grid_y = max(6, int(round(target * xy_span[1] / max_span)))
+    x_index = np.clip((normalized[:, 0] * grid_x).astype(int), 0, grid_x - 1)
+    y_index = np.clip((normalized[:, 1] * grid_y).astype(int), 0, grid_y - 1)
+
+    cells: Dict[tuple, List[int]] = {}
+    for index, key in enumerate(zip(x_index, y_index)):
+        cells.setdefault(key, []).append(index)
+    cell_height = {
+        key: float(np.median(z[indices]))
+        for key, indices in cells.items()
+    }
+
+    central_cells = [
+        key
+        for key in cells
+        if 0.30 <= (key[0] + 0.5) / grid_x <= 0.70
+        and 0.30 <= (key[1] + 0.5) / grid_y <= 0.70
+    ]
+    if not central_cells:
+        return _remove_floating_spikes_local(finite_pts)
+
+    seed = min(
+        central_cells,
+        key=lambda key: (
+            abs(cell_height[key] - center_height)
+            + 0.02
+            * (
+                (key[0] + 0.5 - grid_x / 2.0) ** 2
+                + (key[1] + 0.5 - grid_y / 2.0) ** 2
+            )
+        ),
+    )
+
+    selected_cells = {seed}
+    queue = [seed]
+    queue_index = 0
+    while queue_index < len(queue):
+        key = queue[queue_index]
+        queue_index += 1
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                neighbor = (key[0] + dx, key[1] + dy)
+                if neighbor not in cells or neighbor in selected_cells:
+                    continue
+                if (
+                    abs(cell_height[neighbor] - cell_height[key])
+                    <= neighbor_tolerance
+                    and abs(cell_height[neighbor] - center_height)
+                    <= layer_tolerance
+                ):
+                    selected_cells.add(neighbor)
+                    queue.append(neighbor)
+
+    keep = np.zeros(len(finite_pts), dtype=bool)
+    for key in selected_cells:
+        indices = np.asarray(cells[key], dtype=int)
+        keep[indices] = (
+            (np.abs(z[indices] - cell_height[key]) <= point_tolerance)
+            & (np.abs(z[indices] - center_height) <= layer_tolerance)
+        )
+
+    surface = finite_pts[keep]
+    if len(surface) < max(20, int(len(finite_pts) * 0.10)):
+        return _remove_floating_spikes_local(finite_pts)
+    return surface.copy()
+
+def remove_floating_spikes(
+    pts: np.ndarray,
+    sigma_threshold: float = 8.0,
+    min_height_mm: float = 0.5,
+) -> np.ndarray:
+    """Backward-compatible entry point for connected surface extraction."""
+    return extract_connected_surface_layer(pts)
+
+def analyze_surface_morphology(pts: np.ndarray) -> Dict[str, Any]:
+    """
+    Calculate extensible areal surface-morphology metrics.
+
+    A robust least-squares plane is removed as the reference form. The
+    original point coordinates are not changed. Values are suitable for
+    comparative process analysis; ISO-certified roughness requires calibrated
+    sampling and the specified S/L filters.
+    """
+    if pts is None or len(pts) < 3:
+        raise ValueError("至少需要 3 个有效切面点才能计算形貌")
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        raise ValueError("点云数据必须是包含 X、Y、Z 的二维数组")
+
+    finite_pts = pts[np.all(np.isfinite(pts[:, :3]), axis=1)]
+    if len(finite_pts) < 3:
+        raise ValueError("有效切面点不足，无法计算形貌")
+
+    xyz = finite_pts[:, :3].astype(np.float64)
+    design = np.column_stack((xyz[:, 0], xyz[:, 1], np.ones(len(xyz))))
+    z = xyz[:, 2]
+    inliers = np.ones(len(xyz), dtype=bool)
+    coeffs = np.zeros(3, dtype=float)
+    for _ in range(3):
+        coeffs, *_ = np.linalg.lstsq(design[inliers], z[inliers], rcond=None)
+        fit_residual = z - design @ coeffs
+        center = float(np.median(fit_residual[inliers]))
+        mad = float(
+            np.median(np.abs(fit_residual[inliers] - center)) * 1.4826
+        )
+        if mad <= 1e-12:
+            break
+        next_inliers = np.abs(fit_residual - center) <= 4.0 * mad
+        if np.count_nonzero(next_inliers) < 3 or np.array_equal(next_inliers, inliers):
+            break
+        inliers = next_inliers
+
+    residual_mm = z - design @ coeffs
+    residual_mm -= np.median(residual_mm)
+    residual_um = residual_mm * 1000.0
+    sq = float(np.sqrt(np.mean(residual_um ** 2)))
+    sa = float(np.mean(np.abs(residual_um)))
+    sp = float(np.max(residual_um))
+    sv = float(abs(np.min(residual_um)))
+    sz = sp + sv
+    if sq > 1e-12:
+        ssk = float(np.mean(residual_um ** 3) / (sq ** 3))
+        sku = float(np.mean(residual_um ** 4) / (sq ** 4))
+    else:
+        ssk = 0.0
+        sku = 0.0
+
+    xy_min = np.min(xyz[:, :2], axis=0)
+    xy_max = np.max(xyz[:, :2], axis=0)
+    width, height = xy_max - xy_min
+    projected_area = float(width * height)
+    robust_height = float(
+        np.percentile(residual_um, 95) - np.percentile(residual_um, 5)
+    )
+    slope_x_deg = float(np.degrees(np.arctan(coeffs[0])))
+    slope_y_deg = float(np.degrees(np.arctan(coeffs[1])))
+
+    def metric(
+        key: str,
+        label: str,
+        value: float,
+        unit: str,
+        description: str,
+    ) -> Dict[str, Any]:
+        return {
+            "key": key,
+            "label": label,
+            "value": round(float(value), 4),
+            "unit": unit,
+            "description": description,
+        }
+
+    metrics = [
+        metric("Sa", "算术平均高度 Sa", sa, "µm", "基准面残差绝对值的平均值"),
+        metric("Sq", "均方根高度 Sq", sq, "µm", "基准面残差的均方根"),
+        metric("Sz", "最大高度 Sz", sz, "µm", "最高峰 Sp 与最深谷 Sv 之和"),
+        metric("Sp", "最大峰高 Sp", sp, "µm", "基准面以上的最大高度"),
+        metric("Sv", "最大谷深 Sv", sv, "µm", "基准面以下的最大深度"),
+        metric("Ssk", "偏斜度 Ssk", ssk, "", "高度分布的不对称程度"),
+        metric("Sku", "峭度 Sku", sku, "", "高度分布的尖锐程度"),
+        metric(
+            "height_p95_p5",
+            "稳健高度范围 P95–P5",
+            robust_height,
+            "µm",
+            "排除两端各 5% 极值后的高度范围",
+        ),
+        metric("width", "有效宽度", width, "mm", "参与计算点云的 X 向范围"),
+        metric("height", "有效高度", height, "mm", "参与计算点云的 Y 向范围"),
+        metric(
+            "point_density",
+            "投影点密度",
+            len(xyz) / projected_area if projected_area > 0 else 0.0,
+            "点/mm²",
+            "有效点数除以 X/Y 包围面积",
+        ),
+    ]
+    return {
+        "point_count": int(len(xyz)),
+        "reference_plane": {
+            "a": round(float(coeffs[0]), 8),
+            "b": round(float(coeffs[1]), 8),
+            "c": round(float(coeffs[2]), 8),
+            "slope_x_deg": round(slope_x_deg, 6),
+            "slope_y_deg": round(slope_y_deg, 6),
+            "fit_inlier_count": int(np.count_nonzero(inliers)),
+        },
+        "metrics": metrics,
+        "note": "已去除稳健基准平面；未进行 ISO 25178 规定的 S/L 截止波长滤波，当前结果适用于工艺对比。",
+    }
 
 def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
     """
