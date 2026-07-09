@@ -176,7 +176,7 @@ async def upload_inspection_files(
         for field_name, upload_file in file_fields.items():
             if upload_file is not None and upload_file.filename:
                 ext = os.path.splitext(upload_file.filename)[1]
-                dest_filename = f"{field_name}{ext}"
+                dest_filename = f"{episode_id}_{field_name}{ext}"
                 dest_path = os.path.join(dest_dir, dest_filename)
                 
                 # Write file stream

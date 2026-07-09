@@ -1,6 +1,6 @@
 [
     {
-        "episode_id": "SY-5-6-6-004",
+        "episode_id": "SY-004-5.5-8-8",
         "stage": "manual_run",
         "material": "carbon_steel",
         "thickness_mm": 30.0,
@@ -27,7 +27,7 @@
         "roughness_Sa_um": null,
         "defect_area_mm2": null,
         "manual_comment": "",
-        "quality_score": 30.0,
+        "quality_score": 0.0,
         "point_cloud_front": null,
         "point_cloud_back": null,
         "point_cloud_left": null,
@@ -41,7 +41,7 @@
         "image_bottom": null
     },
     {
-        "episode_id": "SY-5-6-6-003",
+        "episode_id": "SY-003-4-8-8",
         "stage": "manual_run",
         "material": "carbon_steel",
         "thickness_mm": 30.0,
@@ -82,7 +82,7 @@
         "image_bottom": null
     },
     {
-        "episode_id": "SY-5-6-6-002",
+        "episode_id": "SY-002-5-8-11",
         "stage": "manual_run",
         "material": "carbon_steel",
         "thickness_mm": 30.0,
@@ -123,7 +123,7 @@
         "image_bottom": null
     },
     {
-        "episode_id": "SY-5-6-6-001",
+        "episode_id": "SY-001-5-6-6",
         "stage": "manual_run",
         "material": "carbon_steel",
         "thickness_mm": 30.0,

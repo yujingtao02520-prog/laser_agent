@@ -389,7 +389,7 @@ def save_local_inspection_file(episode_id: str, field_name: str, src_path: str) 
     os.makedirs(dest_dir, exist_ok=True)
     
     ext = os.path.splitext(src_path)[1]
-    dest_filename = f"{field_name}{ext}"
+    dest_filename = f"{episode_id}_{field_name}{ext}"
     dest_path = os.path.join(dest_dir, dest_filename)
     
     import shutil

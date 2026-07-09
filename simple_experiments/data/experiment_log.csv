@@ -1,5 +1,5 @@
 episode_id,stage,material,thickness_mm,gas,power_kw,speed_m_min,air_pressure_mpa,focus_mm,A_level,B_level,C_level,D_level,nozzle_height_mm,nozzle_diameter_mm,path_type,energy_index,cut_through,failure_case,kerf_width_top_mm,kerf_width_bottom_mm,taper_mm,dross_height_max_mm,dross_height_mean_mm,roughness_Sa_um,defect_area_mm2,manual_comment,quality_score,point_cloud_front,point_cloud_back,point_cloud_left,point_cloud_right,point_cloud_dross,image_front,image_back,image_left,image_right,image_top,image_bottom
-SY-5-6-6-001,manual_run,carbon_steel,30.0,air,49.8,5.0,6.0,-6.0,,,,,0.5,6.0,straight_line,9.96,False,normal,,,,,,,,,30.0,,,,,,,,,,,
-SY-5-6-6-002,manual_run,carbon_steel,30.0,air,49.8,5.0,8.0,-11.0,,,,,0.5,6.0,straight_line,9.96,False,normal,,,,,,,,,30.0,,,,,,,,,,,
-SY-5-6-6-003,manual_run,carbon_steel,30.0,air,49.8,4.0,8.0,-8.0,,,,,0.5,6.0,straight_line,12.45,False,normal,,,,,,,,,30.0,,,,,,,,,,,
-SY-5-6-6-004,manual_run,carbon_steel,30.0,air,49.8,5.5,8.0,-8.0,,,,,0.5,6.0,straight_line,9.055,False,incomplete_cut,,,,,,,,,30.0,,,,,,,,,,,
+SY-001-5-6-6,manual_run,carbon_steel,30.0,air,49.8,5.0,6.0,-6.0,,,,,0.5,6.0,straight_line,9.96,False,normal,,,,,,,,,30.0,,,,,,,,,,,
+SY-002-5-8-11,manual_run,carbon_steel,30.0,air,49.8,5.0,8.0,-11.0,,,,,0.5,6.0,straight_line,9.96,False,normal,,,,,,,,,30.0,,,,,,,,,,,
+SY-003-4-8-8,manual_run,carbon_steel,30.0,air,49.8,4.0,8.0,-8.0,,,,,0.5,6.0,straight_line,12.45,False,normal,,,,,,,,,30.0,,,,,,,,,,,
+SY-004-5.5-8-8,manual_run,carbon_steel,30.0,air,49.8,5.5,8.0,-8.0,,,,,0.5,6.0,straight_line,9.055,False,incomplete_cut,,,,,,,,,0.0,,,,,,,,,,,
