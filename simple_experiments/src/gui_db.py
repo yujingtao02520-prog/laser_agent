@@ -541,19 +541,19 @@ def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
     img_extensions = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"}
 
     pc_mapping = {
-        "point_cloud_front": ["front", "qian", "qianqiemian", "1", "pc_front", "pc1"],
-        "point_cloud_back": ["back", "hou", "houqiemian", "2", "pc_back", "pc2"],
-        "point_cloud_left": ["left", "zuo", "zuoqiemian", "3", "pc_left", "pc3"],
-        "point_cloud_right": ["right", "you", "youqiemian", "4", "pc_right", "pc4"],
-        "point_cloud_dross": ["dross", "slag", "dizha", "guazha", "pc_dross", "pc5"]
+        "point_cloud_front": ["front", "qian", "qianqiemian", "1", "pc_front", "pc1", "01mian", "1mian"],
+        "point_cloud_back": ["back", "hou", "houqiemian", "2", "pc_back", "pc2", "02mian", "2mian"],
+        "point_cloud_left": ["left", "zuo", "zuoqiemian", "3", "pc_left", "pc3", "03mian", "3mian"],
+        "point_cloud_right": ["right", "you", "youqiemian", "4", "pc_right", "pc4", "04mian", "4mian"],
+        "point_cloud_dross": ["dross", "slag", "dizha", "guazha", "pc_dross", "pc5", "up", "shang"]
     }
     
     img_mapping = {
-        "image_front": ["front", "qian", "qianqiemian", "1", "img_front", "img1"],
-        "image_back": ["back", "hou", "houqiemian", "2", "img_back", "img2"],
-        "image_left": ["left", "zuo", "img_left", "img3"],
-        "image_right": ["right", "you", "img_right", "img4"],
-        "image_top": ["top", "shang", "img_top", "img5"],
+        "image_front": ["front", "qian", "qianqiemian", "1", "img_front", "img1", "01mian", "1mian"],
+        "image_back": ["back", "hou", "houqiemian", "2", "img_back", "img2", "02mian", "2mian"],
+        "image_left": ["left", "zuo", "img_left", "img3", "03mian", "3mian"],
+        "image_right": ["right", "you", "img_right", "img4", "04mian", "4mian"],
+        "image_top": ["top", "shang", "img_top", "img5", "up"],
         "image_bottom": ["bottom", "xia", "img_bottom", "img6"]
     }
 
