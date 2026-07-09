@@ -380,6 +380,21 @@ def get_last_run_parameters() -> Optional[Dict[str, Any]]:
 
 INSPECTION_DIR = os.path.join(DB_DIR, "inspections")
 
+def convert_tif_to_png(tif_path: str, png_path: str):
+    """Converts a TIFF file to PNG using PyQt6 QImage (headless)"""
+    from PyQt6.QtGui import QImage
+    try:
+        img = QImage()
+        if img.load(tif_path):
+            img.save(png_path, "PNG")
+            print(f"[IMAGE] Converted {tif_path} to {png_path}")
+            return True
+        else:
+            print(f"[IMAGE] Failed to load TIFF: {tif_path}")
+    except Exception as e:
+        print(f"[IMAGE] Error converting TIFF {tif_path} to PNG: {e}")
+    return False
+
 def save_local_inspection_file(episode_id: str, field_name: str, src_path: str) -> str:
     """Copies a local file to the structured inspections folder and updates DB with relative path"""
     if not src_path or not os.path.exists(src_path):
@@ -398,6 +413,12 @@ def save_local_inspection_file(episode_id: str, field_name: str, src_path: str) 
     except Exception as e:
         print(f"[DB] Error copying file {src_path}: {e}")
         return ""
+        
+    # Auto-convert TIF to PNG for browser preview support
+    if ext.lower() in [".tif", ".tiff"]:
+        png_filename = f"{episode_id}_{field_name}.png"
+        png_path = os.path.join(dest_dir, png_filename)
+        convert_tif_to_png(dest_path, png_path)
     
     # Update SQLite database with relative path
     rel_path = f"data/inspections/{episode_id}/{dest_filename}"
@@ -410,6 +431,91 @@ def save_local_inspection_file(episode_id: str, field_name: str, src_path: str) 
     
     sync_data_to_files()
     return rel_path
+
+import numpy as np
+
+def parse_point_cloud(file_path: str) -> np.ndarray:
+    """Parses a 3D point cloud file (.pcd, .asc, .csv, .xyz, .ply) and returns (N, 3) float32 numpy array"""
+    if not os.path.exists(file_path):
+        return np.zeros((0, 3), dtype=np.float32)
+        
+    ext = os.path.splitext(file_path)[1].lower()
+    points = []
+    
+    try:
+        if ext == ".pcd":
+            # Simple PCD ASCII parser
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                header_ended = False
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if not header_ended:
+                        if line.startswith("DATA ascii"):
+                            header_ended = True
+                        continue
+                    # Parse data line
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        try:
+                            points.append([float(parts[0]), float(parts[1]), float(parts[2])])
+                        except ValueError:
+                            pass
+        else:
+            # ASC / CSV / XYZ / PLY parser
+            is_ply = (ext == ".ply")
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                header_ended = not is_ply
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if is_ply and not header_ended:
+                        if line == "end_header":
+                            header_ended = True
+                        continue
+                    
+                    # Detect delimiter and split
+                    parts = []
+                    for delim in [",", ";", "\t"]:
+                        if delim in line:
+                            parts = line.split(delim)
+                            break
+                    if not parts:
+                        parts = line.split()
+                        
+                    if len(parts) >= 3:
+                        try:
+                            points.append([float(parts[0]), float(parts[1]), float(parts[2])])
+                        except ValueError:
+                            pass
+                            
+    except Exception as e:
+        print(f"[DB] Error parsing point cloud {file_path}: {e}")
+        
+    if not points:
+        return np.zeros((0, 3), dtype=np.float32)
+        
+    return np.array(points, dtype=np.float32)
+
+def denoise_point_cloud(pts: np.ndarray) -> np.ndarray:
+    """Filter outlier points that lie more than 3 standard deviations from the mean coordinate components"""
+    if len(pts) < 10:
+        return pts
+    mean = np.mean(pts, axis=0)
+    std = np.std(pts, axis=0)
+    std = np.where(std == 0.0, 1.0, std)
+    mask = np.all(np.abs(pts - mean) < 3.0 * std, axis=1)
+    return pts[mask]
+
+def downsample_point_cloud(pts: np.ndarray, target_count: int = 5000) -> np.ndarray:
+    """Downsample point cloud to target number of points by step slicing"""
+    n = len(pts)
+    if n <= target_count:
+        return pts
+    step = n // target_count
+    return pts[::step][:target_count]
 
 # Initialize DB on load
 init_db()

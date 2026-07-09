@@ -183,6 +183,12 @@ async def upload_inspection_files(
                 with open(dest_path, "wb") as f:
                     shutil.copyfileobj(upload_file.file, f)
                     
+                # Auto-convert TIF to PNG for Web view support
+                if ext.lower() in [".tif", ".tiff"]:
+                    png_filename = f"{episode_id}_{field_name}.png"
+                    png_path = os.path.join(dest_dir, png_filename)
+                    gui_db.convert_tif_to_png(dest_path, png_path)
+                    
                 rel_path = f"data/inspections/{episode_id}/{dest_filename}"
                 updated_paths[field_name] = rel_path
                 
@@ -282,7 +288,9 @@ def run_analysis():
         raise HTTPException(status_code=500, detail=str(e))
 
 # Mount static files
+data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+app.mount("/data", StaticFiles(directory=data_dir), name="data")
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":

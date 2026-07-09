@@ -33,32 +33,44 @@
     </header>
 
     <main class="app-main">
-        <!-- 看板统计 -->
-        <section class="stats-grid">
-            <div class="stat-card glass-card">
-                <div class="stat-icon icon-blue"><i class="fa-solid fa-vial"></i></div>
-                <div class="stat-info">
-                    <h3>总试验次数</h3>
-                    <p id="stat-total-runs">-</p>
-                </div>
-            </div>
-            <div class="stat-card glass-card">
-                <div class="stat-icon icon-green"><i class="fa-solid fa-crop"></i></div>
-                <div class="stat-info">
-                    <h3>成功切透率</h3>
-                    <p id="stat-penetration-rate">-</p>
-                </div>
-            </div>
-            <div class="stat-card glass-card">
-                <div class="stat-icon icon-purple"><i class="fa-solid fa-star"></i></div>
-                <div class="stat-info">
-                    <h3>平均质量得分</h3>
-                    <p id="stat-avg-score">-</p>
-                </div>
-            </div>
-        </section>
+        <!-- 主界面 Tab 切换 -->
+        <div class="main-tabs-bar">
+            <button class="main-tab-btn active" id="btn-main-tab-experiments" onclick="switchMainTab('experiments')">
+                <i class="fa-solid fa-list-check"></i> 试验记录与工艺录入
+            </button>
+            <button class="main-tab-btn" id="btn-main-tab-preview" onclick="switchMainTab('preview')">
+                <i class="fa-solid fa-cube"></i> 三维与二维检测预览
+            </button>
+        </div>
 
-        <div class="main-grid">
+        <!-- Tab 1: Experiments Content -->
+        <div id="tab-experiments-content" class="main-tab-content">
+            <!-- 看板统计 -->
+            <section class="stats-grid">
+                <div class="stat-card glass-card">
+                    <div class="stat-icon icon-blue"><i class="fa-solid fa-vial"></i></div>
+                    <div class="stat-info">
+                        <h3>总试验次数</h3>
+                        <p id="stat-total-runs">-</p>
+                    </div>
+                </div>
+                <div class="stat-card glass-card">
+                    <div class="stat-icon icon-green"><i class="fa-solid fa-crop"></i></div>
+                    <div class="stat-info">
+                        <h3>成功切透率</h3>
+                        <p id="stat-penetration-rate">-</p>
+                    </div>
+                </div>
+                <div class="stat-card glass-card">
+                    <div class="stat-icon icon-purple"><i class="fa-solid fa-star"></i></div>
+                    <div class="stat-info">
+                        <h3>平均质量得分</h3>
+                        <p id="stat-avg-score">-</p>
+                    </div>
+                </div>
+            </section>
+
+            <div class="main-grid">
             <!-- 参数录入表单 -->
             <section class="form-container glass-card">
                 <div class="card-header">
@@ -178,6 +190,84 @@
                 </div>
             </div>
         </section>
+        </div> <!-- End of tab-experiments-content -->
+
+        <!-- Tab 2: Preview Content -->
+        <div id="tab-preview-content" class="main-tab-content hidden">
+            <div class="main-grid">
+                <!-- 左面板: 文件列表与分析 -->
+                <section class="form-container glass-card" style="display: flex; flex-direction: column;">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-list-check"></i> 检测文件选择</h2>
+                        <p>请选择试验记录及其已归档文件进行可视化预览。</p>
+                    </div>
+                    
+                    <div class="form-grid" style="margin-bottom: 1.25rem;">
+                        <div class="form-group col-span-2">
+                            <label for="preview-trial-select">选择试验记录</label>
+                            <select id="preview-trial-select" onchange="onPreviewTrialChanged()" style="background: rgba(0,0,0,0.3); border: 1px solid var(--card-border); color: #ffffff; padding: 0.6rem; border-radius: 6px; width: 100%;"></select>
+                        </div>
+                    </div>
+
+                    <div style="flex: 1; min-height: 250px; overflow-y: auto; padding-right: 4px;">
+                        <h4 style="margin-bottom: 0.75rem; color: var(--text-muted); font-size: 0.85rem; letter-spacing: 0.5px;">已归档文件列表:</h4>
+                        <div id="preview-file-slots" style="display: flex; flex-direction: column; gap: 0.6rem;">
+                            <!-- Dynamically loaded by JS -->
+                        </div>
+                    </div>
+
+                    <div class="card-header" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--card-border);">
+                        <h2><i class="fa-solid fa-calculator"></i> 三维点云处理控制台</h2>
+                    </div>
+                    <div class="stats-grid" style="grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem;">
+                        <div class="stat-card glass-card" style="padding: 0.5rem 0.75rem; border-radius: 8px;">
+                            <div class="stat-info">
+                                <h3 style="font-size: 0.75rem;">点云总点数</h3>
+                                <p id="web-pc-count" style="font-size: 1rem; font-weight: bold; margin-top: 0.25rem; color: #38bdf8;">--</p>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-card" style="padding: 0.5rem 0.75rem; border-radius: 8px;">
+                            <div class="stat-info">
+                                <h3 style="font-size: 0.75rem;">X轴尺寸 (宽)</h3>
+                                <p id="web-pc-size-x" style="font-size: 1rem; font-weight: bold; margin-top: 0.25rem; color: #2ec4b6;">--</p>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-card" style="padding: 0.5rem 0.75rem; border-radius: 8px;">
+                            <div class="stat-info">
+                                <h3 style="font-size: 0.75rem;">Y轴尺寸 (高)</h3>
+                                <p id="web-pc-size-y" style="font-size: 1rem; font-weight: bold; margin-top: 0.25rem; color: #2ec4b6;">--</p>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-card" style="padding: 0.5rem 0.75rem; border-radius: 8px;">
+                            <div class="stat-info">
+                                <h3 style="font-size: 0.75rem;">Z轴尺寸 (深)</h3>
+                                <p id="web-pc-size-z" style="font-size: 1rem; font-weight: bold; margin-top: 0.25rem; color: #2ec4b6;">--</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; justify-content: space-between;">
+                        <button class="btn btn-secondary-outline btn-sm" id="web-btn-denoise" onclick="webDenoisePointCloud()" style="flex: 1;" disabled>滤波降噪</button>
+                        <button class="btn btn-secondary-outline btn-sm" id="web-btn-downsample" onclick="webDownsamplePointCloud()" style="flex: 1;" disabled>降采样(5k)</button>
+                        <button class="btn btn-secondary-outline btn-sm" id="web-btn-reset" onclick="webResetPointCloud()" style="flex: 1;" disabled>重置</button>
+                    </div>
+                </section>
+
+                <!-- 右面板: 可视化渲染视窗 -->
+                <section class="table-container glass-card" style="display: flex; flex-direction: column; min-height: 580px;">
+                    <div class="card-header" style="padding-bottom: 0.5rem;">
+                        <h2 id="preview-canvas-title"><i class="fa-solid fa-cube"></i> 检测结果可视化窗口</h2>
+                    </div>
+                    <div id="preview-canvas-container" style="flex: 1; background: #0b0f19; border: 1px solid var(--card-border); border-radius: 8px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                        <div id="preview-placeholder" style="color: var(--text-muted); font-size: 0.9rem; text-align: center;">
+                            <i class="fa-solid fa-compass-drafting" style="font-size: 2rem; margin-bottom: 0.75rem; display: block; color: rgba(255,255,255,0.07);"></i>
+                            请在左侧选择需要预览的检测文件 (.pcd / .asc / .csv / .tif)
+                        </div>
+                        <div id="webgl-canvas" class="hidden" style="width: 100%; height: 100%; cursor: grab;"></div>
+                        <img id="image-viewer" class="hidden" style="max-width: 95%; max-height: 95%; object-fit: contain; border-radius: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+                    </div>
+                </section>
+            </div>
+        </div>
     </main>
 
     <!-- 弹窗：补充质量检测数据 -->
@@ -381,6 +471,9 @@
         </div>
     </div>
 
+    <!-- Load Three.js and OrbitControls for 3D Point Cloud Rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
