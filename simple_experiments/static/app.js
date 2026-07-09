@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('form-edit-parameters').addEventListener('submit', handleEditParametersSubmit);
     document.getElementById('btn-run-analysis').addEventListener('click', runRangeAnalysis);
     initDragAndDrop();
+    initImageControls();
 });
 
 // Toggle Advanced settings in form
@@ -793,6 +794,7 @@ async function viewInspectionFileInWeb(fieldKey, relPath, run) {
         document.getElementById('webgl-canvas').classList.add('hidden');
         const imgViewer = document.getElementById('image-viewer');
         imgViewer.classList.remove('hidden');
+        resetImageTransform();
         
         let displayPath = `/${relPath}`;
         const ext = relPath.split('.').pop().toLowerCase();
@@ -1157,5 +1159,81 @@ async function uploadBulkFiles(files) {
     } finally {
         dropzoneSpan.innerHTML = originalText;
         document.getElementById('web-bulk-file-input').value = '';
+    }
+}
+
+// ==========================================
+// Web 2D Image View Zoom & Pan Controls
+// ==========================================
+
+let imgZoom = 1.0;
+let imgPanX = 0;
+let imgPanY = 0;
+let isImgDragging = false;
+let startImgX = 0;
+let startImgY = 0;
+
+function initImageControls() {
+    const container = document.getElementById('preview-canvas-container');
+    const img = document.getElementById('image-viewer');
+    if (!container || !img) return;
+    
+    // Mouse Scroll Wheel Zoom (Centered)
+    container.addEventListener('wheel', (e) => {
+        if (img.classList.contains('hidden')) return;
+        e.preventDefault();
+        
+        const delta = e.deltaY;
+        if (delta < 0) {
+            imgZoom *= 1.15;
+        } else {
+            imgZoom /= 1.15;
+        }
+        
+        // Limits: 0.1x to 10x
+        imgZoom = Math.max(0.1, Math.min(10.0, imgZoom));
+        updateImageTransform();
+    }, { passive: false });
+    
+    // Mouse Drag Pan
+    img.addEventListener('mousedown', (e) => {
+        if (img.classList.contains('hidden')) return;
+        isImgDragging = true;
+        img.style.cursor = 'grabbing';
+        startImgX = e.clientX - imgPanX;
+        startImgY = e.clientY - imgPanY;
+        e.preventDefault();
+    });
+    
+    window.addEventListener('mousemove', (e) => {
+        if (!isImgDragging) return;
+        imgPanX = e.clientX - startImgX;
+        imgPanY = e.clientY - startImgY;
+        updateImageTransform();
+    });
+    
+    window.addEventListener('mouseup', () => {
+        if (isImgDragging) {
+            isImgDragging = false;
+            img.style.cursor = 'grab';
+        }
+    });
+}
+
+function updateImageTransform() {
+    const img = document.getElementById('image-viewer');
+    if (img) {
+        img.style.transform = `translate(${imgPanX}px, ${imgPanY}px) scale(${imgZoom})`;
+    }
+}
+
+function resetImageTransform() {
+    imgZoom = 1.0;
+    imgPanX = 0;
+    imgPanY = 0;
+    updateImageTransform();
+    const img = document.getElementById('image-viewer');
+    if (img) {
+        img.style.cursor = 'grab';
     }
 }

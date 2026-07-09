@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+import numpy as np
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -398,7 +399,91 @@ class EditParamsDialog(QDialog):
             "nozzle_height_mm": self.nozzle_height.value(),
         }
 
-import numpy as np
+class ImageViewer(QScrollArea):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.label = QLabel()
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setWidget(self.label)
+        
+        self.pixmap = None
+        self.zoom_factor = 1.0
+        
+        # Cursor & Pan states
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.pan_active = False
+        self.last_mouse_pos = None
+        
+    def set_image(self, file_path: str):
+        from PyQt6.QtGui import QPixmap
+        self.pixmap = QPixmap(file_path)
+        self.zoom_factor = 1.0
+        self.update_view()
+        
+    def update_view(self):
+        if self.pixmap is None or self.pixmap.isNull():
+            self.label.setText("无法加载图片")
+            return
+            
+        # Calculate zoomed size
+        target_size = self.pixmap.size() * self.zoom_factor
+        scaled_pix = self.pixmap.scaled(
+            target_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.label.setPixmap(scaled_pix)
+        self.label.resize(scaled_pix.size())
+        
+    def wheelEvent(self, event):
+        if self.pixmap is None or self.pixmap.isNull():
+            super().wheelEvent(event)
+            return
+            
+        # Zoom Factor modification
+        angle = event.angleDelta().y()
+        if angle > 0:
+            self.zoom_factor *= 1.15
+        else:
+            self.zoom_factor /= 1.15
+            
+        self.zoom_factor = max(0.1, min(10.0, self.zoom_factor))
+        self.update_view()
+        event.accept()
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.pan_active = True
+            self.last_mouse_pos = event.position().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+            
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.pan_active = False
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+            
+    def mouseMoveEvent(self, event):
+        if self.pan_active and self.last_mouse_pos is not None:
+            delta = event.position().toPoint() - self.last_mouse_pos
+            self.last_mouse_pos = event.position().toPoint()
+            
+            # Scroll scrollbars programmatically
+            h_bar = self.horizontalScrollBar()
+            v_bar = self.verticalScrollBar()
+            h_bar.setValue(h_bar.value() - delta.x())
+            v_bar.setValue(v_bar.value() - delta.y())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
 
 class PointCloudViewer(QWidget):
     def __init__(self, parent=None):
@@ -737,13 +822,8 @@ class MainWindow(QMainWindow):
         self.pc_viewer = PointCloudViewer()
         self.stacked_view.addWidget(self.pc_viewer)
         
-        self.image_scroll = QScrollArea()
-        self.image_scroll.setWidgetResizable(True)
-        self.image_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_lbl = QLabel()
-        self.image_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_scroll.setWidget(self.image_lbl)
-        self.stacked_view.addWidget(self.image_scroll)
+        self.image_viewer = ImageViewer()
+        self.stacked_view.addWidget(self.image_viewer)
         
         right_layout.addWidget(self.stacked_view)
         
@@ -837,13 +917,8 @@ class MainWindow(QMainWindow):
             self.lbl_bbox_y.setText("Y 尺寸 (高): --")
             self.lbl_bbox_z.setText("Z 尺寸 (深): --")
             
-            self.stacked_view.setCurrentIndex(2) # QLabel Image
-            from PyQt6.QtGui import QPixmap
-            pix = QPixmap(abs_path)
-            if not pix.isNull():
-                self.image_lbl.setPixmap(pix.scaled(self.image_scroll.viewport().size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-            else:
-                self.image_lbl.setText("无法加载图片文件 (格式错误或损坏)")
+            self.stacked_view.setCurrentIndex(2) # ImageViewer
+            self.image_viewer.set_image(abs_path)
 
     def _update_point_cloud_view(self):
         pts = self.current_pts
@@ -913,12 +988,6 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, 'stacked_view') and self.stacked_view.currentIndex() == 2:
-            if hasattr(self, 'current_file_path') and self.current_file_path:
-                from PyQt6.QtGui import QPixmap
-                pix = QPixmap(self.current_file_path)
-                if not pix.isNull():
-                    self.image_lbl.setPixmap(pix.scaled(self.image_scroll.viewport().size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def _build_form_panel(self) -> QWidget:
         panel = QGroupBox("记录新切割试验")
