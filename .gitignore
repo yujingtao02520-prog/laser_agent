@@ -17,3 +17,15 @@ agent_L1/backend/llm_config.json
 agent_L1/data/LaserProcessDB.db
 simple_experiments/data/orthogonal_experiments.db
 *.bak
+
+# PyInstaller & Build artifacts
+_internal/
+*.exe
+dist/
+build/
+*.spec
+simple_experiments/工控机程序/
+simple_experiments/tests/
+simple_experiments/reports/
+simple_experiments/scratch/
+

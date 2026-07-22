@@ -1,6 +1,6 @@
 [
     {
-        "episode_id": "SY-004-5.5-8-8",
+        "episode_id": "SY-n004-v5.5-p8-f8",
         "stage": "manual_run",
         "material": "carbon_steel",
         "thickness_mm": 30.0,
@@ -38,10 +38,11 @@
         "image_left": null,
         "image_right": null,
         "image_top": null,
-        "image_bottom": null
+        "image_bottom": null,
+        "point_cloud_top": null
     },
     {
-        "episode_id": "SY-003-4-8-8",
+        "episode_id": "SY-n003-v4-p8-f8",
         "stage": "manual_run",
         "material": "carbon_steel",
         "thickness_mm": 30.0,
@@ -79,10 +80,11 @@
         "image_left": null,
         "image_right": null,
         "image_top": null,
-        "image_bottom": null
+        "image_bottom": null,
+        "point_cloud_top": null
     },
     {
-        "episode_id": "SY-002-5-8-11",
+        "episode_id": "SY-n002-v5-p8-f11",
         "stage": "manual_run",
         "material": "carbon_steel",
         "thickness_mm": 30.0,
@@ -120,10 +122,11 @@
         "image_left": null,
         "image_right": null,
         "image_top": null,
-        "image_bottom": null
+        "image_bottom": null,
+        "point_cloud_top": null
     },
     {
-        "episode_id": "SY-001-5-6-6",
+        "episode_id": "SY-n001-v5-p6-f6",
         "stage": "manual_run",
         "material": "carbon_steel",
         "thickness_mm": 30.0,
@@ -151,16 +154,17 @@
         "defect_area_mm2": null,
         "manual_comment": "",
         "quality_score": 30.0,
-        "point_cloud_front": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_point_cloud_front.pcd",
-        "point_cloud_back": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_point_cloud_back.pcd",
-        "point_cloud_left": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_point_cloud_left.pcd",
-        "point_cloud_right": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_point_cloud_right.pcd",
-        "point_cloud_dross": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_point_cloud_dross.pcd",
-        "image_front": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_image_front.bmp",
-        "image_back": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_image_back.bmp",
-        "image_left": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_image_left.bmp",
-        "image_right": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_image_right.bmp",
-        "image_top": "data/inspections/SY-001-5-6-6/SY-001-5-6-6_image_top.bmp",
-        "image_bottom": null
+        "point_cloud_front": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_point_cloud_front.pcd",
+        "point_cloud_back": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_point_cloud_back.pcd",
+        "point_cloud_left": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_point_cloud_left.pcd",
+        "point_cloud_right": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_point_cloud_right.pcd",
+        "point_cloud_dross": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_point_cloud_dross.pcd",
+        "image_front": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_image_front.bmp",
+        "image_back": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_image_back.bmp",
+        "image_left": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_image_left.bmp",
+        "image_right": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_image_right.bmp",
+        "image_top": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_image_top.tif",
+        "image_bottom": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_image_bottom.bmp",
+        "point_cloud_top": "data/inspections/SY-n001-v5-p6-f6/SY-n001-v5-p6-f6_point_cloud_top.pcd"
     }
 ]

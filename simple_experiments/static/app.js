@@ -289,6 +289,7 @@ function openSupplementModal(episodeId) {
         'status-pc-back': run.point_cloud_back,
         'status-pc-left': run.point_cloud_left,
         'status-pc-right': run.point_cloud_right,
+        'status-pc-top': run.point_cloud_top,
         'status-pc-dross': run.point_cloud_dross,
         'status-img-front': run.image_front,
         'status-img-back': run.image_back,
@@ -352,6 +353,7 @@ async function handleSupplementQualitySubmit(e) {
             'point_cloud_back': document.getElementById('file-pc-back').files[0],
             'point_cloud_left': document.getElementById('file-pc-left').files[0],
             'point_cloud_right': document.getElementById('file-pc-right').files[0],
+            'point_cloud_top': document.getElementById('file-pc-top').files[0],
             'point_cloud_dross': document.getElementById('file-pc-dross').files[0],
             'image_front': document.getElementById('file-img-front').files[0],
             'image_back': document.getElementById('file-img-back').files[0],
@@ -605,13 +607,17 @@ function closeAnalysis() {
 // 3D Point Cloud & 2D Image Previewer Tab
 // ==========================================
 
-let threeScene, threeCamera, threeRenderer, threeControls, threePointsObj;
+let threeScene, threeCamera, threeRenderer, threeControls, threePointsObj, threeMaskObj;
 let originalPointsData = [];
 let currentPointsData = [];
 let currentPreviewFieldKey = "";
 let currentPreviewEpisodeId = "";
 let currentActualPointCount = null;
 let currentFullMorphology = null;
+let currentPreviewRun = null;
+let currentDrossMapping = null;
+let currentDrossMask = [];
+let drossMaskVisible = true;
 
 // Main Tab switching
 function switchMainTab(tab) {
@@ -686,13 +692,14 @@ function onPreviewTrialChanged() {
         ["point_cloud_back", "后切面点云 (3D)"],
         ["point_cloud_left", "左切面点云 (3D)"],
         ["point_cloud_right", "右切面点云 (3D)"],
-        ["point_cloud_dross", "挂渣底面点云 (3D)"],
+        ["point_cloud_top", "上表面点云 (Up/Top) (3D)"],
+        ["point_cloud_dross", "下切面挂渣点云 (Down/Dross) (3D)"],
         ["image_front", "前切面图像 (2D)"],
         ["image_back", "后切面图像 (2D)"],
         ["image_left", "左切面图像 (2D)"],
         ["image_right", "右切面图像 (2D)"],
-        ["image_top", "上表面图像 (2D)"],
-        ["image_bottom", "下表面图像 (2D)"],
+        ["image_top", "上表面图像 (Up/Top) (2D)"],
+        ["image_bottom", "下表面图像 (Down/Bottom) (2D)"],
     ];
     
     fileDefinitions.forEach(([fieldKey, label]) => {
@@ -759,11 +766,19 @@ function resetWebPreviewControls() {
     document.getElementById('web-btn-remove-spikes').disabled = true;
     document.getElementById('web-btn-remove-spikes').textContent = '提取真实切面层（去底面/毛刺）';
     document.getElementById('web-btn-morphology').disabled = true;
+    document.getElementById('web-btn-map-dross').disabled = true;
+    document.getElementById('web-btn-map-dross').textContent = '3D 凸起映射到 2D 挂渣框';
+    currentDrossMapping = null;
+    currentDrossMask = [];
+    drossMaskVisible = true;
     clearWebMorphologyResult();
     
-    document.getElementById('preview-placeholder').classList.remove('hidden');
+    document.getElementById('preview-3d-placeholder').classList.remove('hidden');
+    document.getElementById('preview-2d-placeholder').classList.remove('hidden');
     document.getElementById('webgl-canvas').classList.add('hidden');
     document.getElementById('image-viewer').classList.add('hidden');
+    document.getElementById('dross-mask-legend').classList.add('hidden');
+    document.getElementById('web-btn-toggle-dross-mask').classList.add('hidden');
 }
 
 // Display selected file in Web viewer
@@ -771,13 +786,14 @@ async function viewInspectionFileInWeb(fieldKey, relPath, run) {
     resetWebPreviewControls();
     currentPreviewFieldKey = fieldKey;
     currentPreviewEpisodeId = run.episode_id;
+    currentPreviewRun = run;
     
     const isPointCloud = fieldKey.includes('cloud');
-    document.getElementById('preview-placeholder').classList.add('hidden');
-    
     if (isPointCloud) {
+        document.getElementById('preview-3d-placeholder').classList.add('hidden');
         document.getElementById('webgl-canvas').classList.remove('hidden');
         document.getElementById('image-viewer').classList.add('hidden');
+        document.getElementById('preview-2d-placeholder').classList.remove('hidden');
         
         initThreeJS();
         
@@ -791,6 +807,7 @@ async function viewInspectionFileInWeb(fieldKey, relPath, run) {
             
             originalPointsData = data.points.map(pt => ({ x: pt[0], y: pt[1], z: pt[2] }));
             currentPointsData = [...originalPointsData];
+            currentDrossMask = [];
             currentActualPointCount = null;
             currentFullMorphology = null;
             
@@ -810,9 +827,7 @@ async function viewInspectionFileInWeb(fieldKey, relPath, run) {
         }
     } else {
         // 2D Image View
-        document.getElementById('webgl-canvas').classList.add('hidden');
-        const imgViewer = document.getElementById('image-viewer');
-        imgViewer.classList.remove('hidden');
+        document.getElementById('preview-2d-placeholder').classList.add('hidden');
         resetImageTransform();
         
         let displayPath = `/${relPath}`;
@@ -824,10 +839,91 @@ async function viewInspectionFileInWeb(fieldKey, relPath, run) {
             displayPath = `/${baseWithoutExt}.png`;
         }
         
-        imgViewer.src = displayPath;
-        imgViewer.onerror = () => {
-            imgViewer.alt = "图片加载失败 (如果是TIF，请确认服务已自动转换PNG)";
-        };
+        renderImageCanvas(displayPath);
+    }
+}
+
+function renderImageCanvas(displayPath, boxes = []) {
+    const canvas = document.getElementById('image-viewer');
+    const context = canvas.getContext('2d');
+    const image = new Image();
+    image.onload = () => {
+        const scale = Math.min(1, 2000 / Math.max(1, image.naturalWidth));
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        boxes.forEach((box, index) => {
+            const x = box.x_min * scale;
+            const y = box.y_min * scale;
+            const width = (box.x_max - box.x_min) * scale;
+            const height = (box.y_max - box.y_min) * scale;
+            context.strokeStyle = '#ef4444';
+            context.lineWidth = Math.max(3, canvas.width / 500);
+            context.strokeRect(x, y, width, height);
+
+            const fontSize = Math.max(16, canvas.width / 70);
+            const label = `${box.label || `挂渣 ${index + 1}`}  H=${Number(box.max_height_mm).toFixed(3)} mm`;
+            context.font = `bold ${fontSize}px sans-serif`;
+            const labelWidth = context.measureText(label).width + 14;
+            const labelHeight = fontSize + 10;
+            const labelY = Math.max(0, y - labelHeight);
+            context.fillStyle = 'rgba(239, 68, 68, 0.88)';
+            context.fillRect(x, labelY, labelWidth, labelHeight);
+            context.fillStyle = '#ffffff';
+            context.fillText(label, x + 7, labelY + fontSize + 2);
+        });
+        document.getElementById('preview-2d-placeholder').classList.add('hidden');
+        canvas.classList.remove('hidden');
+    };
+    image.onerror = () => {
+        canvas.classList.add('hidden');
+        document.getElementById('preview-2d-placeholder').classList.remove('hidden');
+        alert('图片加载失败（如果是 TIF，请确认服务已自动转换 PNG）');
+    };
+    image.src = displayPath;
+}
+
+function displayDrossMapping(mapping) {
+    if (!mapping || !mapping.image_path || !mapping.boxes || mapping.boxes.length === 0) {
+        return false;
+    }
+    currentDrossMapping = mapping;
+    document.getElementById('preview-2d-placeholder').classList.add('hidden');
+    resetImageTransform();
+    renderImageCanvas(`/${mapping.image_path}`, mapping.boxes);
+    resizeThreeJS();
+    const button = document.getElementById('web-btn-map-dross');
+    button.disabled = false;
+    button.textContent = `已映射挂渣框（峰高 ${Number(mapping.boxes[0].max_height_mm).toFixed(3)} mm）`;
+    return true;
+}
+
+async function webMapDrossTo2D() {
+    if (currentDrossMapping && displayDrossMapping(currentDrossMapping)) return;
+    if (!currentPreviewEpisodeId) return;
+    const button = document.getElementById('web-btn-map-dross');
+    button.disabled = true;
+    button.textContent = '正在识别凸起并映射…';
+    try {
+        const response = await fetch(
+            `/api/experiments/${encodeURIComponent(currentPreviewEpisodeId)}/dross-map`,
+            { method: 'POST' }
+        );
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || '挂渣映射失败');
+        }
+        const mapping = await response.json();
+        if (!displayDrossMapping(mapping)) {
+            button.textContent = '未发现显著挂渣凸起';
+        }
+    } catch (error) {
+        button.textContent = '3D 凸起映射到 2D 挂渣框';
+        alert(`挂渣映射失败：${error.message}`);
+    } finally {
+        button.disabled = false;
     }
 }
 
@@ -876,12 +972,18 @@ function resizeThreeJS() {
 }
 
 // Render points using buffer geometry
-function renderPointsInThree(points) {
+function renderPointsInThree(points, defectMask = [], preserveView = false) {
     if (threePointsObj) {
         threeScene.remove(threePointsObj);
         threePointsObj.geometry.dispose();
         threePointsObj.material.dispose();
         threePointsObj = null;
+    }
+    if (threeMaskObj) {
+        threeScene.remove(threeMaskObj);
+        threeMaskObj.geometry.dispose();
+        threeMaskObj.material.dispose();
+        threeMaskObj = null;
     }
     
     if (points.length === 0) return;
@@ -889,6 +991,9 @@ function renderPointsInThree(points) {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(points.length * 3);
     const colors = new Float32Array(points.length * 3);
+    const hasMask = defectMask.length === points.length && defectMask.some(Boolean);
+    const renderMask = hasMask && drossMaskVisible;
+    const maskPositions = [];
     
     let minX = Infinity, maxX = -Infinity;
     let minY = Infinity, maxY = -Infinity;
@@ -915,11 +1020,18 @@ function renderPointsInThree(points) {
         positions[idx * 3 + 1] = py;
         positions[idx * 3 + 2] = pz;
         
-        // Depth gradient color map: Cyan (56, 189, 248) -> Purple (168, 85, 247)
-        const t = pz + 0.5; // map normalized [-0.5, 0.5] depth to [0, 1]
-        colors[idx * 3] = (56 + (168 - 56) * t) / 255;
-        colors[idx * 3 + 1] = (189 + (85 - 189) * t) / 255;
-        colors[idx * 3 + 2] = (248 + (247 - 248) * t) / 255;
+        if (renderMask && defectMask[idx]) {
+            colors[idx * 3] = 1.0;
+            colors[idx * 3 + 1] = 0.18;
+            colors[idx * 3 + 2] = 0.10;
+            maskPositions.push(px, py, pz);
+        } else {
+            // Depth gradient color map: Cyan -> Purple.
+            const t = pz + 0.5;
+            colors[idx * 3] = (56 + (168 - 56) * t) / 255;
+            colors[idx * 3 + 1] = (189 + (85 - 189) * t) / 255;
+            colors[idx * 3 + 2] = (248 + (247 - 248) * t) / 255;
+        }
     });
     
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -934,9 +1046,52 @@ function renderPointsInThree(points) {
     
     threePointsObj = new THREE.Points(geometry, material);
     threeScene.add(threePointsObj);
+
+    if (maskPositions.length > 0) {
+        const maskGeometry = new THREE.BufferGeometry();
+        maskGeometry.setAttribute(
+            'position',
+            new THREE.BufferAttribute(new Float32Array(maskPositions), 3)
+        );
+        const maskMaterial = new THREE.PointsMaterial({
+            size: 0.027,
+            color: 0xff3b24,
+            transparent: true,
+            opacity: 1.0
+        });
+        threeMaskObj = new THREE.Points(maskGeometry, maskMaterial);
+        threeScene.add(threeMaskObj);
+    }
+
+    const legend = document.getElementById('dross-mask-legend');
+    if (legend) {
+        legend.classList.toggle('hidden', !renderMask);
+        const count = legend.querySelector('[data-mask-count]');
+        if (count) {
+            const total = defectMask.reduce((sum, value) => sum + (value ? 1 : 0), 0);
+            count.textContent = total.toLocaleString();
+        }
+    }
+
+    const toggleButton = document.getElementById('web-btn-toggle-dross-mask');
+    if (toggleButton) {
+        toggleButton.classList.toggle('hidden', !hasMask);
+        toggleButton.classList.toggle('mask-hidden', !drossMaskVisible);
+        toggleButton.textContent = drossMaskVisible
+            ? '隐藏起渣 mask'
+            : '显示起渣 mask';
+    }
     
-    threeCamera.position.set(0, 0, 1.4);
-    threeControls.reset();
+    if (!preserveView) {
+        threeCamera.position.set(0, 0, 1.4);
+        threeControls.reset();
+    }
+}
+
+function toggleDrossMask3D() {
+    if (currentDrossMask.length !== currentPointsData.length) return;
+    drossMaskVisible = !drossMaskVisible;
+    renderPointsInThree(currentPointsData, currentDrossMask, true);
 }
 
 // Parse PCD, PLY, ASC, CSV content in JS
@@ -998,7 +1153,7 @@ function parsePointCloudData(text, ext) {
 }
 
 function updateWebPointCloudView() {
-    renderPointsInThree(currentPointsData);
+    renderPointsInThree(currentPointsData, currentDrossMask);
     
     const countEl = document.getElementById('web-pc-count');
     const xEl = document.getElementById('web-pc-size-x');
@@ -1062,6 +1217,7 @@ function webDenoisePointCloud() {
     });
     currentActualPointCount = null;
     currentFullMorphology = null;
+    currentDrossMask = [];
     clearWebMorphologyResult();
     updateWebPointCloudView();
 }
@@ -1080,6 +1236,7 @@ function webDownsamplePointCloud() {
     currentPointsData = downsampled;
     currentActualPointCount = null;
     currentFullMorphology = null;
+    currentDrossMask = [];
     clearWebMorphologyResult();
     updateWebPointCloudView();
 }
@@ -1117,6 +1274,7 @@ function webExtractCoreRegion() {
     currentPointsData = [...corePoints];
     currentActualPointCount = null;
     currentFullMorphology = null;
+    currentDrossMask = [];
     clearWebMorphologyResult();
     updateWebPointCloudView();
 }
@@ -1509,6 +1667,10 @@ async function webExtractAdaptiveCoreRegion() {
         currentPointsData = result.display_points.map(
             pt => ({ x: pt[0], y: pt[1], z: pt[2] })
         );
+        currentDrossMask = Array.isArray(result.display_mask)
+            ? result.display_mask.map(Boolean)
+            : [];
+        drossMaskVisible = true;
         currentActualPointCount = result.surface_point_count;
         currentFullMorphology = result.morphology;
         updateWebPointCloudView();
@@ -1521,6 +1683,15 @@ async function webExtractAdaptiveCoreRegion() {
             `已剔除 ${removed.toLocaleString()} 个底面/毛刺点`;
         document.getElementById('web-btn-remove-spikes').disabled = true;
         renderWebMorphologyResult(currentFullMorphology);
+        if (currentPreviewFieldKey === 'point_cloud_dross') {
+            const mapButton = document.getElementById('web-btn-map-dross');
+            mapButton.disabled = false;
+            if (result.dross_mapping && result.dross_mapping.boxes.length > 0) {
+                displayDrossMapping(result.dross_mapping);
+            } else {
+                mapButton.textContent = '未发现显著挂渣凸起';
+            }
+        }
     } catch (error) {
         alert(`原始切面提取失败：${error.message}`);
         button.textContent = '自适应识别并提取中心切面';
@@ -1535,6 +1706,7 @@ function webRemoveFloatingSpikes() {
     currentPointsData = extractConnectedSurfaceLayer(currentPointsData);
     currentActualPointCount = null;
     currentFullMorphology = null;
+    currentDrossMask = [];
     document.getElementById('web-btn-remove-spikes').textContent =
         `已剔除 ${before - currentPointsData.length} 个底面/毛刺点`;
     document.getElementById('web-btn-remove-spikes').disabled = true;
@@ -1613,9 +1785,18 @@ function webResetPointCloud() {
     currentPointsData = [...originalPointsData];
     currentActualPointCount = null;
     currentFullMorphology = null;
+    currentDrossMapping = null;
+    currentDrossMask = [];
+    drossMaskVisible = true;
     document.getElementById('web-btn-adaptive-core').textContent = '自适应识别并提取中心切面';
     document.getElementById('web-btn-remove-spikes').textContent = '提取真实切面层（去底面/毛刺）';
     document.getElementById('web-btn-remove-spikes').disabled = false;
+    document.getElementById('web-btn-map-dross').textContent = '3D 凸起映射到 2D 挂渣框';
+    document.getElementById('web-btn-map-dross').disabled = true;
+    document.getElementById('image-viewer').classList.add('hidden');
+    document.getElementById('preview-2d-placeholder').classList.remove('hidden');
+    document.getElementById('preview-3d-placeholder').classList.add('hidden');
+    document.getElementById('webgl-canvas').classList.remove('hidden');
     clearWebMorphologyResult();
     updateWebPointCloudView();
 }
@@ -1729,7 +1910,7 @@ let startImgX = 0;
 let startImgY = 0;
 
 function initImageControls() {
-    const container = document.getElementById('preview-canvas-container');
+    const container = document.getElementById('preview-image-pane');
     const img = document.getElementById('image-viewer');
     if (!container || !img) return;
     

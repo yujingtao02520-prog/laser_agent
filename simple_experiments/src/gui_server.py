@@ -138,6 +138,7 @@ async def upload_inspection_files(
     point_cloud_back: Optional[UploadFile] = None,
     point_cloud_left: Optional[UploadFile] = None,
     point_cloud_right: Optional[UploadFile] = None,
+    point_cloud_top: Optional[UploadFile] = None,
     point_cloud_dross: Optional[UploadFile] = None,
     image_front: Optional[UploadFile] = None,
     image_back: Optional[UploadFile] = None,
@@ -163,6 +164,7 @@ async def upload_inspection_files(
             "point_cloud_back": point_cloud_back,
             "point_cloud_left": point_cloud_left,
             "point_cloud_right": point_cloud_right,
+            "point_cloud_top": point_cloud_top,
             "point_cloud_dross": point_cloud_dross,
             "image_front": image_front,
             "image_back": image_back,
@@ -207,6 +209,33 @@ async def upload_inspection_files(
         return {"status": "success", "updated_fields": list(updated_paths.keys())}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/experiments/{episode_id}/import-luminance")
+async def import_luminance_endpoint(
+    episode_id: str,
+    files: List[UploadFile] = File(...)
+):
+    """Upload multiple Luminance / TIF images, automatically assign to image_top or image_bottom."""
+    runs = gui_db.get_all_runs()
+    if not any(r["episode_id"] == episode_id for r in runs):
+        raise HTTPException(status_code=404, detail="找不到该试验记录")
+    
+    import tempfile
+    import shutil
+    temp_dir = tempfile.mkdtemp()
+    saved_paths = []
+    try:
+        for f in files:
+            temp_path = os.path.join(temp_dir, f.filename)
+            with open(temp_path, "wb") as buffer:
+                shutil.copyfileobj(f.file, buffer)
+            saved_paths.append(temp_path)
+            
+        res = gui_db.import_luminance_images(episode_id, saved_paths)
+        return res
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 @app.post("/api/analyze")
 def run_analysis():
@@ -373,12 +402,88 @@ def process_full_resolution_surface(episode_id: str, field: str):
         surface = result.pop("surface_points")
         morphology = gui_db.analyze_surface_morphology(surface)
         display_points = gui_db.downsample_point_cloud(surface, target_count=100_000)
-        return {
+        response = {
             **result,
             "render_point_count": int(len(display_points)),
             "display_points": display_points.tolist(),
             "morphology": morphology,
         }
+        if field == "point_cloud_dross":
+            detection = gui_db.detect_surface_protrusions(
+                surface,
+                min_area_mm2=2.0,
+                max_regions=1,
+            )
+            display_mask = gui_db.build_protrusion_region_mask(
+                display_points,
+                detection,
+            )
+            response["display_mask"] = display_mask.astype(np.uint8).tolist()
+            response["dross_mask_point_count"] = int(
+                np.count_nonzero(display_mask)
+            )
+            image_rel_path = matched_run.get("image_top")
+            image_path = (
+                os.path.join(project_dir, image_rel_path)
+                if image_rel_path
+                else ""
+            )
+            if image_path and os.path.exists(image_path):
+                image_roi = gui_db.detect_workpiece_image_roi(image_path)
+                mapping = gui_db.map_protrusions_to_image(
+                    detection,
+                    image_roi,
+                    transform="rotate_ccw",
+                )
+                mapping["image_path"] = image_rel_path
+                response["dross_mapping"] = mapping
+        return response
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/experiments/{episode_id}/dross-map")
+def map_dross_to_image(episode_id: str):
+    """Detect the main 3D protrusion and map it onto the top 2D image."""
+    runs = gui_db.get_all_runs()
+    matched_run = next((r for r in runs if r["episode_id"] == episode_id), None)
+    if not matched_run:
+        raise HTTPException(status_code=404, detail="找不到该试验记录")
+    point_rel_path = matched_run.get("point_cloud_dross") or matched_run.get("point_cloud_top")
+    image_rel_path = matched_run.get("image_bottom") or matched_run.get("image_top")
+    if not point_rel_path or not image_rel_path:
+        raise HTTPException(status_code=400, detail="需要同时归档挂渣/上表面点云与对应的 2D 图像")
+
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    point_path = os.path.join(project_dir, point_rel_path)
+    image_path = os.path.join(project_dir, image_rel_path)
+    if not os.path.exists(point_path) or not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail="找不到点云或对应的 2D 图像文件")
+
+    try:
+        extraction = gui_db.extract_full_resolution_surface(point_path)
+        surface = extraction["surface_points"]
+        detection = gui_db.detect_surface_protrusions(
+            surface,
+            min_area_mm2=2.0,
+            max_regions=1,
+        )
+        image_roi = gui_db.detect_workpiece_image_roi(image_path)
+        mapping = gui_db.map_protrusions_to_image(
+            detection,
+            image_roi,
+            transform="rotate_ccw",
+        )
+        mapping.update(
+            {
+                "image_path": image_rel_path,
+                "surface_point_count": extraction["surface_point_count"],
+                "source_point_count": extraction["source_point_count"],
+            }
+        )
+        return mapping
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

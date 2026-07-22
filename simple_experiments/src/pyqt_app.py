@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QMatrix4x4, QPainter
+from PyQt6.QtGui import QColor, QFont, QMatrix4x4, QPainter, QPen, QPixmap
 from PyQt6.QtOpenGL import (
     QOpenGLBuffer,
     QOpenGLShader,
@@ -216,13 +216,14 @@ class QualityDialog(QDialog):
             ("point_cloud_back", "后切面点云"),
             ("point_cloud_left", "左切面点云"),
             ("point_cloud_right", "右切面点云"),
-            ("point_cloud_dross", "挂渣底面点云"),
+            ("point_cloud_top", "上表面点云 (Up/Top)"),
+            ("point_cloud_dross", "下切面挂渣点云 (Down/Dross)"),
             ("image_front", "前切面图像"),
             ("image_back", "后切面图像"),
             ("image_left", "左切面图像"),
             ("image_right", "右切面图像"),
-            ("image_top", "上表面图像"),
-            ("image_bottom", "下表面图像"),
+            ("image_top", "上表面图像 (Up/Top)"),
+            ("image_bottom", "下表面图像 (Down/Bottom)"),
         ]
 
         for field_key, field_label in file_definitions:
@@ -419,6 +420,7 @@ class ImageViewer(QScrollArea):
         self.setWidget(self.label)
         
         self.pixmap = None
+        self.annotation_boxes: List[Dict[str, Any]] = []
         self.zoom_factor = 1.0
         
         # Cursor & Pan states
@@ -426,10 +428,18 @@ class ImageViewer(QScrollArea):
         self.pan_active = False
         self.last_mouse_pos = None
         
-    def set_image(self, file_path: str):
-        from PyQt6.QtGui import QPixmap
+    def set_image(
+        self,
+        file_path: str,
+        annotation_boxes: Optional[List[Dict[str, Any]]] = None,
+    ):
         self.pixmap = QPixmap(file_path)
+        self.annotation_boxes = list(annotation_boxes or [])
         self.zoom_factor = 1.0
+        self.update_view()
+
+    def set_annotations(self, annotation_boxes: List[Dict[str, Any]]):
+        self.annotation_boxes = list(annotation_boxes or [])
         self.update_view()
         
     def update_view(self):
@@ -437,9 +447,48 @@ class ImageViewer(QScrollArea):
             self.label.setText("无法加载图片")
             return
             
+        annotated_pixmap = QPixmap(self.pixmap)
+        if self.annotation_boxes:
+            painter = QPainter(annotated_pixmap)
+            line_width = max(4, int(round(self.pixmap.width() / 1500.0)))
+            painter.setPen(QPen(QColor(239, 68, 68), line_width))
+            font = QFont()
+            font.setBold(True)
+            font.setPixelSize(max(24, int(round(self.pixmap.width() / 220.0))))
+            painter.setFont(font)
+            for box in self.annotation_boxes:
+                x_min = int(box["x_min"])
+                y_min = int(box["y_min"])
+                width = max(1, int(box["x_max"]) - x_min)
+                height = max(1, int(box["y_max"]) - y_min)
+                painter.drawRect(x_min, y_min, width, height)
+                label = (
+                    f"{box.get('label', '挂渣')}  "
+                    f"H={box.get('max_height_mm', 0):.3f} mm"
+                )
+                metrics = painter.fontMetrics()
+                label_width = metrics.horizontalAdvance(label) + 18
+                label_height = metrics.height() + 10
+                label_y = max(0, y_min - label_height)
+                painter.fillRect(
+                    x_min,
+                    label_y,
+                    label_width,
+                    label_height,
+                    QColor(239, 68, 68, 220),
+                )
+                painter.setPen(QColor(255, 255, 255))
+                painter.drawText(
+                    x_min + 9,
+                    label_y + metrics.ascent() + 5,
+                    label,
+                )
+                painter.setPen(QPen(QColor(239, 68, 68), line_width))
+            painter.end()
+
         # Calculate zoomed size
-        target_size = self.pixmap.size() * self.zoom_factor
-        scaled_pix = self.pixmap.scaled(
+        target_size = annotated_pixmap.size() * self.zoom_factor
+        scaled_pix = annotated_pixmap.scaled(
             target_size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
@@ -506,6 +555,8 @@ class PointCloudViewer(QOpenGLWidget):
         super().__init__(parent)
         self.points = np.zeros((0, 3), dtype=np.float32)
         self.gpu_points = np.zeros((0, 3), dtype=np.float32)
+        self.gpu_vertices = np.zeros((0, 4), dtype=np.float32)
+        self.mask_point_count = 0
         self.total_point_count = 0
         self.render_point_count = 0
         self.theta = 0.5  # Yaw angle
@@ -520,7 +571,7 @@ class PointCloudViewer(QOpenGLWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMinimumSize(300, 300)
         
-    def set_points(self, pts: np.ndarray):
+    def set_points(self, pts: np.ndarray, defect_mask: Optional[np.ndarray] = None):
         self.points = pts
         self.total_point_count = len(pts)
         if len(pts) > 0:
@@ -536,10 +587,22 @@ class PointCloudViewer(QOpenGLWidget):
                 )
             else:
                 self.gpu_points = np.zeros_like(pts, dtype=np.float32)
+            if defect_mask is None or len(defect_mask) != len(pts):
+                mask_values = np.zeros(len(pts), dtype=np.float32)
+            else:
+                mask_values = np.asarray(defect_mask, dtype=np.float32).reshape(-1)
+                mask_values = np.clip(mask_values, 0.0, 1.0)
+            self.mask_point_count = int(np.count_nonzero(mask_values > 0.5))
+            self.gpu_vertices = np.ascontiguousarray(
+                np.column_stack((self.gpu_points, mask_values)),
+                dtype=np.float32,
+            )
             self.render_point_count = len(self.gpu_points)
         else:
             self.render_point_count = 0
+            self.mask_point_count = 0
             self.gpu_points = np.zeros((0, 3), dtype=np.float32)
+            self.gpu_vertices = np.zeros((0, 4), dtype=np.float32)
 
         if self.gl_ready and self.isValid():
             self.makeCurrent()
@@ -566,21 +629,27 @@ class PointCloudViewer(QOpenGLWidget):
             vertex_shader = """
                 #version 120
                 attribute vec3 position;
+                attribute float defectMask;
                 uniform mat4 mvp;
                 varying float depthColor;
+                varying float maskColor;
                 void main() {
                     gl_Position = mvp * vec4(position, 1.0);
-                    gl_PointSize = 2.0;
+                    gl_PointSize = mix(2.0, 5.0, defectMask);
                     depthColor = clamp(position.z + 0.5, 0.0, 1.0);
+                    maskColor = defectMask;
                 }
             """
             fragment_shader = """
                 #version 120
                 varying float depthColor;
+                varying float maskColor;
                 void main() {
                     vec3 cyan = vec3(56.0, 189.0, 248.0) / 255.0;
                     vec3 purple = vec3(168.0, 85.0, 247.0) / 255.0;
-                    gl_FragColor = vec4(mix(cyan, purple, depthColor), 0.90);
+                    vec3 baseColor = mix(cyan, purple, depthColor);
+                    vec3 maskRed = vec3(1.0, 0.18, 0.10);
+                    gl_FragColor = vec4(mix(baseColor, maskRed, maskColor), 0.95);
                 }
             """
             if not self.shader_program.addShaderFromSourceCode(
@@ -594,6 +663,7 @@ class PointCloudViewer(QOpenGLWidget):
             ):
                 raise RuntimeError(self.shader_program.log())
             self.shader_program.bindAttributeLocation("position", 0)
+            self.shader_program.bindAttributeLocation("defectMask", 1)
             if not self.shader_program.link():
                 raise RuntimeError(self.shader_program.log())
 
@@ -614,7 +684,7 @@ class PointCloudViewer(QOpenGLWidget):
         if not self.vertex_buffer.bind():
             self.gl_error = "无法绑定 OpenGL 点云缓冲区"
             return
-        raw = self.gpu_points.tobytes(order="C")
+        raw = self.gpu_vertices.tobytes(order="C")
         self.vertex_buffer.allocate(raw, len(raw))
         self.vertex_buffer.release()
 
@@ -681,9 +751,12 @@ class PointCloudViewer(QOpenGLWidget):
             self.shader_program.setUniformValue("mvp", mvp)
             self.vertex_buffer.bind()
             self.shader_program.enableAttributeArray(0)
-            self.shader_program.setAttributeBuffer(0, self.GL_FLOAT, 0, 3, 12)
+            self.shader_program.enableAttributeArray(1)
+            self.shader_program.setAttributeBuffer(0, self.GL_FLOAT, 0, 3, 16)
+            self.shader_program.setAttributeBuffer(1, self.GL_FLOAT, 12, 1, 16)
             self.gl_functions.glDrawArrays(self.GL_POINTS, 0, self.render_point_count)
             self.shader_program.disableAttributeArray(0)
+            self.shader_program.disableAttributeArray(1)
             self.vertex_buffer.release()
             self.shader_program.release()
 
@@ -699,6 +772,13 @@ class PointCloudViewer(QOpenGLWidget):
             painter.drawText(15, 25, f"GPU 渲染点数: {self.render_point_count:,}")
             painter.drawText(15, 45, f"旋转: Yaw={self.theta:.2f}, Pitch={self.phi:.2f}")
             painter.drawText(15, 65, f"缩放: {self.zoom:.2f}x (滚轮/拖动)")
+            if self.mask_point_count:
+                painter.setPen(QColor(255, 82, 55))
+                painter.drawText(
+                    15,
+                    85,
+                    f"● 3D 起渣面 mask: {self.mask_point_count:,} 点",
+                )
         painter.end()
 
 
@@ -816,13 +896,14 @@ class MainWindow(QMainWindow):
             ("point_cloud_back", "后切面点云", "3d"),
             ("point_cloud_left", "左切面点云", "3d"),
             ("point_cloud_right", "右切面点云", "3d"),
-            ("point_cloud_dross", "挂渣底面点云", "3d"),
+            ("point_cloud_top", "上表面点云 (Up/Top)", "3d"),
+            ("point_cloud_dross", "下切面挂渣点云 (Down/Dross)", "3d"),
             ("image_front", "前切面图像", "2d"),
             ("image_back", "后切面图像", "2d"),
             ("image_left", "左切面图像", "2d"),
             ("image_right", "右切面图像", "2d"),
-            ("image_top", "上表面图像", "2d"),
-            ("image_bottom", "下表面图像", "2d"),
+            ("image_top", "上表面图像 (Up/Top)", "2d"),
+            ("image_bottom", "下表面图像 (Down/Bottom)", "2d"),
         ]
         
         for field_key, field_name, file_type in file_definitions:
@@ -858,6 +939,13 @@ class MainWindow(QMainWindow):
         self.btn_auto_scan.setObjectName("primaryButton")
         self.btn_auto_scan.clicked.connect(self._on_auto_scan_clicked)
         left_layout.addWidget(self.btn_auto_scan)
+
+        # Add One-Click Multi-Luminance Import Button
+        self.btn_import_luminance = QPushButton("一键多选导入亮度图 (Luminance)")
+        self.btn_import_luminance.setObjectName("ghostButton")
+        self.btn_import_luminance.setToolTip("多选包含 luminance / up / down 的基恩士亮度图/TIF，自动分配入库")
+        self.btn_import_luminance.clicked.connect(self._on_import_luminance_clicked)
+        left_layout.addWidget(self.btn_import_luminance)
         
         # Point Cloud processing controls
         proc_box = QGroupBox("三维点云处理控制台")
@@ -929,13 +1017,25 @@ class MainWindow(QMainWindow):
         self.btn_analyze_surface.clicked.connect(self._on_analyze_surface_clicked)
         proc_layout.addWidget(self.btn_analyze_surface)
 
+        self.btn_map_dross = QPushButton("3D 凸起映射到 2D 挂渣框")
+        self.btn_map_dross.setObjectName("primaryButton")
+        self.btn_map_dross.setEnabled(False)
+        self.btn_map_dross.clicked.connect(self._on_map_dross_clicked)
+        proc_layout.addWidget(self.btn_map_dross)
+
+        # Surface metrics and dross mapping are the primary actions; keep them
+        # directly below the point-cloud summary instead of at the panel foot.
+        proc_layout.insertWidget(4, self.btn_analyze_surface)
+        proc_layout.insertWidget(5, self.btn_map_dross)
+
         self.morphology_output = QTextEdit()
         self.morphology_output.setReadOnly(True)
-        self.morphology_output.setMaximumHeight(190)
+        self.morphology_output.setMinimumHeight(120)
         self.morphology_output.setPlaceholderText("提取真实切面后，可计算 Sa、Sq、Sz 等形貌指标")
-        proc_layout.addWidget(self.morphology_output)
-        
-        left_layout.addWidget(proc_box)
+
+        # Put the processing controls above the long file list so they remain
+        # visible without scrolling to the bottom of the left panel.
+        left_layout.insertWidget(2, proc_box)
         
         # Right Panel: Canvas
         right_panel = QGroupBox("检测结果可视化窗口")
@@ -943,20 +1043,53 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(6, 6, 6, 6)
         
-        self.stacked_view = QStackedWidget()
-        
-        self.placeholder_lbl = QLabel("请在左侧选择需要预览的检测文件 (.pcd/.asc/.csv/.tif)")
-        self.placeholder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.placeholder_lbl.setStyleSheet("color: #94a3b8; font-size: 14px;")
-        self.stacked_view.addWidget(self.placeholder_lbl)
-        
+        visual_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        pc_group = QGroupBox("3D 点云（保留交互视图）")
+        pc_group_layout = QVBoxLayout(pc_group)
+        pc_group_layout.setContentsMargins(4, 4, 4, 4)
+        self.dross_mask_visible = True
+        mask_toolbar = QHBoxLayout()
+        mask_toolbar.addStretch()
+        self.btn_toggle_dross_mask = QPushButton("显示起渣 mask")
+        self.btn_toggle_dross_mask.setObjectName("smallButton")
+        self.btn_toggle_dross_mask.setEnabled(False)
+        self.btn_toggle_dross_mask.clicked.connect(
+            self._on_toggle_dross_mask_clicked
+        )
+        mask_toolbar.addWidget(self.btn_toggle_dross_mask)
+        pc_group_layout.addLayout(mask_toolbar)
+        self.pc_stack = QStackedWidget()
+        self.pc_placeholder_lbl = QLabel("请选择 3D 点云文件")
+        self.pc_placeholder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pc_placeholder_lbl.setStyleSheet("color: #94a3b8; font-size: 13px;")
+        self.pc_stack.addWidget(self.pc_placeholder_lbl)
         self.pc_viewer = PointCloudViewer()
-        self.stacked_view.addWidget(self.pc_viewer)
-        
+        self.pc_stack.addWidget(self.pc_viewer)
+        pc_group_layout.addWidget(self.pc_stack)
+
+        image_group = QGroupBox("2D 图像 / 挂渣标注")
+        image_group_layout = QVBoxLayout(image_group)
+        image_group_layout.setContentsMargins(4, 4, 4, 4)
+        self.image_stack = QStackedWidget()
+        self.image_placeholder_lbl = QLabel("映射完成后在此显示 2D 挂渣框")
+        self.image_placeholder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_placeholder_lbl.setStyleSheet("color: #94a3b8; font-size: 13px;")
+        self.image_stack.addWidget(self.image_placeholder_lbl)
         self.image_viewer = ImageViewer()
-        self.stacked_view.addWidget(self.image_viewer)
-        
-        right_layout.addWidget(self.stacked_view)
+        self.image_stack.addWidget(self.image_viewer)
+        image_group_layout.addWidget(self.image_stack)
+
+        visual_splitter.addWidget(pc_group)
+        visual_splitter.addWidget(image_group)
+        visual_splitter.setSizes([560, 440])
+        right_layout.addWidget(visual_splitter, stretch=1)
+
+        results_group = QGroupBox("表面形貌与挂渣检测结果")
+        results_layout = QVBoxLayout(results_group)
+        results_layout.setContentsMargins(8, 8, 8, 8)
+        results_layout.addWidget(self.morphology_output)
+        right_layout.addWidget(results_group)
         
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
@@ -993,7 +1126,7 @@ class MainWindow(QMainWindow):
             
         self.current_preview_run = run
         file_keys = [
-            "point_cloud_front", "point_cloud_back", "point_cloud_left", "point_cloud_right", "point_cloud_dross",
+            "point_cloud_front", "point_cloud_back", "point_cloud_left", "point_cloud_right", "point_cloud_top", "point_cloud_dross",
             "image_front", "image_back", "image_left", "image_right", "image_top", "image_bottom"
         ]
         for key in file_keys:
@@ -1031,6 +1164,8 @@ class MainWindow(QMainWindow):
         if "cloud" in field_key:
             self.original_pts = gui_db.parse_point_cloud(abs_path)
             self.current_pts = self.original_pts.copy()
+            self.current_dross_mask = None
+            self.dross_mask_visible = True
             self.full_surface_result = None
             
             self.btn_denoise.setEnabled(True)
@@ -1043,9 +1178,12 @@ class MainWindow(QMainWindow):
             self.btn_remove_spikes.setEnabled(True)
             self.btn_remove_spikes.setText("提取真实切面层（去底面/毛刺）")
             self.btn_analyze_surface.setEnabled(True)
+            self.btn_map_dross.setEnabled(False)
+            self.btn_map_dross.setText("3D 凸起映射到 2D 挂渣框")
             self.morphology_output.clear()
             
-            self.stacked_view.setCurrentIndex(1) # PointCloudViewer
+            self.pc_stack.setCurrentIndex(1)
+            self.image_stack.setCurrentIndex(0)
             self._update_point_cloud_view()
         else:
             self.btn_denoise.setEnabled(False)
@@ -1056,6 +1194,7 @@ class MainWindow(QMainWindow):
             self.btn_adaptive_core.setEnabled(False)
             self.btn_remove_spikes.setEnabled(False)
             self.btn_analyze_surface.setEnabled(False)
+            self.btn_map_dross.setEnabled(False)
             self.morphology_output.clear()
             
             self.lbl_points_count.setText("点数: --")
@@ -1063,12 +1202,25 @@ class MainWindow(QMainWindow):
             self.lbl_bbox_y.setText("Y 尺寸 (高): --")
             self.lbl_bbox_z.setText("Z 尺寸 (深): --")
             
-            self.stacked_view.setCurrentIndex(2) # ImageViewer
             self.image_viewer.set_image(abs_path)
+            self.image_stack.setCurrentIndex(1)
 
     def _update_point_cloud_view(self):
         pts = self.current_pts
-        self.pc_viewer.set_points(pts)
+        defect_mask = getattr(self, "current_dross_mask", None)
+        if defect_mask is not None and len(defect_mask) != len(pts):
+            defect_mask = None
+        has_mask = bool(
+            defect_mask is not None and np.count_nonzero(defect_mask) > 0
+        )
+        visible_mask = defect_mask if has_mask and self.dross_mask_visible else None
+        self.pc_viewer.set_points(pts, visible_mask)
+        self.btn_toggle_dross_mask.setEnabled(has_mask)
+        self.btn_toggle_dross_mask.setText(
+            "隐藏起渣 mask"
+            if has_mask and self.dross_mask_visible
+            else "显示起渣 mask"
+        )
         self.lbl_points_count.setText(f"点数: {len(pts):,}")
         if len(pts) > 0:
             pt_min = np.min(pts, axis=0)
@@ -1086,12 +1238,14 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'current_pts') or len(self.current_pts) == 0:
             return
         self.current_pts = gui_db.denoise_point_cloud(self.current_pts)
+        self.current_dross_mask = None
         self._update_point_cloud_view()
 
     def _on_downsample_clicked(self):
         if not hasattr(self, 'current_pts') or len(self.current_pts) == 0:
             return
         self.current_pts = gui_db.downsample_point_cloud(self.current_pts, target_count=5000)
+        self.current_dross_mask = None
         self._update_point_cloud_view()
 
     def _on_extract_core_clicked(self):
@@ -1107,6 +1261,7 @@ class MainWindow(QMainWindow):
             )
             return
         self.current_pts = core_pts
+        self.current_dross_mask = None
         self._update_point_cloud_view()
 
     def _on_adaptive_core_clicked(self):
@@ -1135,6 +1290,7 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
 
         self.current_pts = result["surface_points"]
+        self.current_dross_mask = None
         self.full_surface_result = result
         self._update_point_cloud_view()
         self.btn_adaptive_core.setText(
@@ -1146,12 +1302,16 @@ class MainWindow(QMainWindow):
         self.btn_remove_spikes.setText(f"已剔除 {removed:,} 个底面/毛刺点")
         self.btn_remove_spikes.setEnabled(False)
         self._on_analyze_surface_clicked()
+        if self.current_file_key in {"point_cloud_top", "point_cloud_dross"}:
+            self.btn_map_dross.setEnabled(True)
+            self._map_dross_to_2d(show_messages=False)
 
     def _on_remove_spikes_clicked(self):
         if not hasattr(self, 'current_pts') or len(self.current_pts) == 0:
             return
         before = len(self.current_pts)
         self.current_pts = gui_db.extract_connected_surface_layer(self.current_pts)
+        self.current_dross_mask = None
         removed = before - len(self.current_pts)
         self.btn_remove_spikes.setText(f"已剔除 {removed} 个底面/毛刺点")
         self.btn_remove_spikes.setEnabled(False)
@@ -1181,14 +1341,122 @@ class MainWindow(QMainWindow):
         )
         self.morphology_output.setPlainText("\n".join(lines))
 
+    def _on_map_dross_clicked(self):
+        self._map_dross_to_2d(show_messages=True)
+
+    def _map_dross_to_2d(self, show_messages: bool = True):
+        if (
+            not hasattr(self, "current_pts")
+            or len(self.current_pts) < 30
+            or not hasattr(self, "current_preview_run")
+        ):
+            return
+        # Select corresponding 2D image: top for point_cloud_top, bottom (or top) for point_cloud_dross
+        is_top = (getattr(self, "current_file_key", None) == "point_cloud_top")
+        image_key = "image_top" if is_top else "image_bottom"
+        image_rel_path = self.current_preview_run.get(image_key) or self.current_preview_run.get("image_top") or self.current_preview_run.get("image_bottom")
+        if not image_rel_path:
+            if show_messages:
+                QMessageBox.warning(
+                    self,
+                    "缺少对应图像",
+                    "当前试验没有归档对应的 2D 图像 (image_top / image_bottom)，无法绘制映射框。",
+                )
+            return
+
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        image_path = os.path.join(project_dir, image_rel_path)
+        if not os.path.exists(image_path):
+            if show_messages:
+                QMessageBox.warning(
+                    self,
+                    "图像不存在",
+                    f"找不到对应的 2D 图像：{image_path}",
+                )
+            return
+
+        self.btn_map_dross.setEnabled(False)
+        self.btn_map_dross.setText("正在识别凸起并映射…")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
+        try:
+            detection = gui_db.detect_surface_protrusions(
+                self.current_pts,
+                min_area_mm2=2.0,
+                max_regions=1,
+            )
+            if not detection["regions"]:
+                self.btn_map_dross.setText("未发现显著挂渣凸起")
+                if show_messages:
+                    QMessageBox.information(
+                        self,
+                        "未发现挂渣",
+                        "当前自适应阈值下未发现面积足够的显著凸起。",
+                    )
+                return
+            self.current_dross_mask = gui_db.build_protrusion_region_mask(
+                self.current_pts,
+                detection,
+            )
+            self.dross_mask_visible = True
+            self._update_point_cloud_view()
+            image_roi = gui_db.detect_workpiece_image_roi(image_path)
+            mapped = gui_db.map_protrusions_to_image(
+                detection,
+                image_roi,
+                transform="rotate_ccw",
+            )
+            self.dross_mapping_result = mapped
+            self.image_viewer.set_image(image_path, mapped["boxes"])
+            # Keep the 3D point cloud visible and show the mapped 2D result in
+            # the neighboring pane instead of replacing the point-cloud view.
+            self.pc_stack.setCurrentIndex(1)
+            self.image_stack.setCurrentIndex(1)
+            main_box = mapped["boxes"][0]
+            self.btn_map_dross.setText(
+                f"已映射挂渣框（峰高 {main_box['max_height_mm']:.3f} mm）"
+            )
+            existing = self.morphology_output.toPlainText().rstrip()
+            mapping_lines = [
+                "",
+                "3D → 2D 挂渣映射：",
+                f"3D 起渣面 mask：{np.count_nonzero(self.current_dross_mask):,} 点（红色）",
+                f"自适应凸起阈值：{mapped['threshold_mm']:.3f} mm",
+                (
+                    "像素框："
+                    f"({main_box['x_min']}, {main_box['y_min']}) – "
+                    f"({main_box['x_max']}, {main_box['y_max']})"
+                ),
+                "方向：点云逆时针旋转 90° 后映射到上表面图像",
+            ]
+            self.morphology_output.setPlainText(existing + "\n".join(mapping_lines))
+        except Exception as exc:
+            self.btn_map_dross.setText("3D 凸起映射到 2D 挂渣框")
+            if show_messages:
+                QMessageBox.warning(self, "挂渣映射失败", str(exc))
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.btn_map_dross.setEnabled(True)
+
+    def _on_toggle_dross_mask_clicked(self):
+        mask = getattr(self, "current_dross_mask", None)
+        if mask is None or len(mask) != len(self.current_pts):
+            return
+        self.dross_mask_visible = not self.dross_mask_visible
+        self._update_point_cloud_view()
+
     def _on_reset_pc_clicked(self):
         if not hasattr(self, 'original_pts') or len(self.original_pts) == 0:
             return
         self.current_pts = self.original_pts.copy()
+        self.current_dross_mask = None
+        self.dross_mask_visible = True
         self.full_surface_result = None
         self.btn_adaptive_core.setText("自适应识别并提取中心切面")
         self.btn_remove_spikes.setText("提取真实切面层（去底面/毛刺）")
         self.btn_remove_spikes.setEnabled(True)
+        self.btn_map_dross.setText("3D 凸起映射到 2D 挂渣框")
+        self.btn_map_dross.setEnabled(False)
         self.morphology_output.clear()
         self._update_point_cloud_view()
 
@@ -1224,6 +1492,32 @@ class MainWindow(QMainWindow):
         
         self.refresh_data()
 
+    def _on_import_luminance_clicked(self):
+        if not hasattr(self, "current_preview_run") or not self.current_preview_run:
+            QMessageBox.warning(self, "未选择试验", "请先在列表中选中一条试验记录！")
+            return
+        episode_id = self.current_preview_run.get("episode_id")
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "多选选择基恩士/亮度图文件 (Luminance)",
+            "",
+            "Image Files (*.tif *.tiff *.png *.jpg *.bmp *.jpeg);;All Files (*)"
+        )
+        if not file_paths:
+            return
+        res = gui_db.import_luminance_images(episode_id, file_paths)
+        if res.get("status") == "success":
+            count = res.get("imported_count", 0)
+            slots = ", ".join(res.get("assigned_slots", {}).keys())
+            QMessageBox.information(
+                self,
+                "亮度图多选导入成功",
+                f"为试验 [{episode_id}] 成功导入并归档 {count} 个亮度图文件：\n{slots}"
+            )
+            self.refresh_data()
+        else:
+            QMessageBox.warning(self, "导入失败", res.get("message", "导入出错"))
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
 
@@ -1240,7 +1534,7 @@ class MainWindow(QMainWindow):
         form.setVerticalSpacing(10)
 
         self.episode_id_input = QLineEdit()
-        self.episode_id_input.setPlaceholderText("留空则自动生成名称/ID")
+        self.episode_id_input.setPlaceholderText("例如 SY-n001-v5.5-p8-f8；留空则自动生成")
         self.power = make_spin(83.0, 0.0, 100.0, 1, 1.0)
         self.speed = make_spin(0.9, 0.1, 10.0, 2, 0.05)
         self.pressure = make_spin(1.5, 0.0, 100.0, 2, 0.05)

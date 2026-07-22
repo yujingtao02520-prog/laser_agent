@@ -26,20 +26,21 @@ def match_and_archive(episode_id: str, src_dir: str):
     
     # Keywords matching maps
     pc_mapping = {
-        "point_cloud_front": ["front", "qian", "qianqiemian", "1"],
-        "point_cloud_back": ["back", "hou", "houqiemian", "2"],
-        "point_cloud_left": ["left", "zuo", "zuoqiemian", "3"],
-        "point_cloud_right": ["right", "you", "youqiemian", "4"],
-        "point_cloud_dross": ["dross", "slag", "dizha", "zha", "guazha", "5"]
+        "point_cloud_front": ["front", "qian", "qianqiemian", "1", "01mian"],
+        "point_cloud_back": ["back", "hou", "houqiemian", "2", "02mian"],
+        "point_cloud_left": ["left", "zuo", "zuoqiemian", "3", "03mian"],
+        "point_cloud_right": ["right", "you", "youqiemian", "4", "04mian"],
+        "point_cloud_top": ["top", "shang", "shangbiaomian", "5", "05mian", "up"],
+        "point_cloud_dross": ["dross", "slag", "dizha", "zha", "guazha", "down", "xia", "bottom"]
     }
     
     img_mapping = {
-        "image_front": ["front", "qian", "qianqiemian", "1"],
-        "image_back": ["back", "hou", "houqiemian", "2"],
-        "image_left": ["left", "zuo", "zuoqiemian", "3"],
-        "image_right": ["right", "you", "youqiemian", "4"],
-        "image_top": ["top", "shang", "shangbiaomian", "5"],
-        "image_bottom": ["bottom", "xia", "xiabiaomian", "6"]
+        "image_front": ["front", "qian", "qianqiemian", "1", "01mian"],
+        "image_back": ["back", "hou", "houqiemian", "2", "02mian"],
+        "image_left": ["left", "zuo", "zuoqiemian", "3", "03mian"],
+        "image_right": ["right", "you", "youqiemian", "4", "04mian"],
+        "image_top": ["top", "shang", "shangbiaomian", "5", "05mian", "up"],
+        "image_bottom": ["bottom", "xia", "xiabiaomian", "6", "06mian", "down"]
     }
     
     pc_results = {}
@@ -101,7 +102,7 @@ def match_and_archive(episode_id: str, src_dir: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="自动扫描、命名、整理归档试验的图片与点云文件")
-    parser.add_argument("--id", type=str, help="试验 ID (如 SY-5-6-6-001)，如果不指定，默认使用最后一次试验记录")
+    parser.add_argument("--id", type=str, help="试验 ID (如 SY-n001-v5.5-p8-f8)，如果不指定，默认使用最后一次试验记录")
     parser.add_argument("--dir", type=str, default=".", help="临时照片和点云的文件夹路径 (默认是当前文件夹)")
     args = parser.parse_args()
     

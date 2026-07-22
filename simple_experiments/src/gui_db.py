@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import pandas as pd
 from typing import List, Dict, Any, Optional
@@ -8,6 +9,38 @@ DB_FILE = os.path.join(DB_DIR, "orthogonal_experiments.db")
 CSV_FILE = os.path.join(DB_DIR, "experiment_log.csv")
 JSON_FILE = os.path.join(DB_DIR, "experiment_log.json")
 SOURCE_CSV_FILE = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "正交实验demo", "data", "metadata", "experiment_log.csv"))
+
+
+def _format_episode_value(value: Any, *, absolute: bool = False) -> str:
+    """Format a process value compactly for use in an experiment ID."""
+    number = float(value)
+    if absolute:
+        number = abs(number)
+    if number == 0:
+        number = 0.0
+    return f"{number:.10f}".rstrip("0").rstrip(".")
+
+
+def build_episode_id(
+    sequence: int,
+    speed_m_min: Any,
+    air_pressure_mpa: Any,
+    focus_mm: Any,
+) -> str:
+    """Build an ID such as ``SY-n001-v5.5-p8-f8``."""
+    return (
+        f"SY-n{int(sequence):03d}"
+        f"-v{_format_episode_value(speed_m_min)}"
+        f"-p{_format_episode_value(air_pressure_mpa)}"
+        f"-f{_format_episode_value(focus_mm, absolute=True)}"
+    )
+
+
+def extract_episode_number(episode_id: str) -> Optional[int]:
+    """Read the sequence from both old ``SY-001`` and new ``SY-n001`` IDs."""
+    match = re.match(r"^SY-(?:n)?(\d+)(?:-|$)", str(episode_id), re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
 
 def init_db():
     if not os.path.exists(DB_DIR):
@@ -50,6 +83,7 @@ def init_db():
             point_cloud_back TEXT,
             point_cloud_left TEXT,
             point_cloud_right TEXT,
+            point_cloud_top TEXT,
             point_cloud_dross TEXT,
             image_front TEXT,
             image_back TEXT,
@@ -62,7 +96,7 @@ def init_db():
     
     # Run migration for existing databases to add new columns if they do not exist
     for col_name in [
-        "point_cloud_front", "point_cloud_back", "point_cloud_left", "point_cloud_right", "point_cloud_dross",
+        "point_cloud_front", "point_cloud_back", "point_cloud_left", "point_cloud_right", "point_cloud_top", "point_cloud_dross",
         "image_front", "image_back", "image_left", "image_right", "image_top", "image_bottom"
     ]:
         try:
@@ -175,26 +209,25 @@ def get_all_runs() -> List[Dict[str, Any]]:
 def add_run(params: Dict[str, Any]) -> str:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    
+
+    power = float(params.get('power_kw', 54))
+    speed = float(params.get('speed_m_min', 0.8))
+    pressure = float(params.get('air_pressure_mpa', 1.5))
+    focus = float(params.get('focus_mm', -9))
+
     # Auto generate episode_id if not present
     episode_id = params.get('episode_id')
     if not episode_id:
-        cursor.execute("SELECT episode_id FROM experiment_runs WHERE episode_id LIKE 'LC_CS30_AIR_L9_%' ORDER BY episode_id DESC LIMIT 1;")
-        last_row = cursor.fetchone()
-        if last_row:
-            last_id = last_row[0]
-            try:
-                num = int(last_id.split('_')[-1])
-                new_num = num + 1
-            except Exception:
-                new_num = 10
-            episode_id = f"LC_CS30_AIR_L9_{new_num:04d}"
-        else:
-            episode_id = "LC_CS30_AIR_L9_0010"
-            
+        cursor.execute("SELECT episode_id FROM experiment_runs;")
+        sequence_numbers = [
+            number
+            for (existing_id,) in cursor.fetchall()
+            if (number := extract_episode_number(existing_id)) is not None
+        ]
+        next_sequence = max(sequence_numbers, default=0) + 1
+        episode_id = build_episode_id(next_sequence, speed, pressure, focus)
+
     # Calculate energy index: Power / Speed (kW / m/min)
-    power = float(params.get('power_kw', 54))
-    speed = float(params.get('speed_m_min', 0.8))
     energy_index = round(power / speed, 3) if speed > 0 else 0.0
     
     cursor.execute("""
@@ -214,8 +247,8 @@ def add_run(params: Dict[str, Any]) -> str:
         params.get('gas', 'air'),
         power,
         speed,
-        float(params.get('air_pressure_mpa', 1.5)),
-        float(params.get('focus_mm', -9)),
+        pressure,
+        focus,
         params.get('A_level'),
         params.get('B_level'),
         params.get('C_level'),
@@ -1209,6 +1242,463 @@ def analyze_surface_morphology(pts: np.ndarray) -> Dict[str, Any]:
         "note": "已去除稳健基准平面；未进行 ISO 25178 规定的 S/L 截止波长滤波，当前结果适用于工艺对比。",
     }
 
+
+def detect_surface_protrusions(
+    pts: np.ndarray,
+    min_height_mm: Optional[float] = None,
+    grid_cell_mm: float = 0.25,
+    min_area_mm2: float = 0.50,
+    merge_gap_mm: float = 0.50,
+    max_regions: int = 20,
+) -> Dict[str, Any]:
+    """Detect connected positive-height protrusions on an extracted surface.
+
+    The detector removes a robust reference plane, derives a height threshold
+    from the residual noise, and groups the high points in an X/Y occupancy
+    grid.  Returned boxes contain both millimetre coordinates and coordinates
+    normalized to the extracted workpiece surface.
+    """
+    if pts is None or len(pts) < 30:
+        raise ValueError("至少需要 30 个切面点才能识别挂渣凸起")
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        raise ValueError("点云数据必须是包含 X、Y、Z 的二维数组")
+
+    xyz = pts[np.all(np.isfinite(pts[:, :3]), axis=1), :3].astype(
+        np.float64,
+        copy=False,
+    )
+    if len(xyz) < 30:
+        raise ValueError("有效切面点不足，无法识别挂渣凸起")
+
+    # Robustly fit the nominal workpiece plane. Positive residuals are the
+    # physical protrusions visible on the upper surface scan.
+    design = np.column_stack((xyz[:, 0], xyz[:, 1], np.ones(len(xyz))))
+    z = xyz[:, 2]
+    inliers = np.ones(len(xyz), dtype=bool)
+    coeffs = np.zeros(3, dtype=np.float64)
+    for _ in range(4):
+        coeffs, *_ = np.linalg.lstsq(design[inliers], z[inliers], rcond=None)
+        fit_residual = z - design @ coeffs
+        center = float(np.median(fit_residual[inliers]))
+        sigma = float(
+            1.4826 * np.median(np.abs(fit_residual[inliers] - center))
+        )
+        if sigma <= 1e-12:
+            break
+        next_inliers = np.abs(fit_residual - center) <= 4.0 * sigma
+        if np.count_nonzero(next_inliers) < 30 or np.array_equal(
+            next_inliers,
+            inliers,
+        ):
+            break
+        inliers = next_inliers
+
+    residual = z - design @ coeffs
+    residual_center = float(np.median(residual))
+    residual -= residual_center
+    noise_sigma = float(1.4826 * np.median(np.abs(residual)))
+    adaptive_threshold = max(0.05, 6.0 * noise_sigma)
+    if min_height_mm is not None:
+        adaptive_threshold = max(float(min_height_mm), adaptive_threshold)
+    # Prevent a very rough surface from making the detector completely blind.
+    adaptive_threshold = min(adaptive_threshold, 0.30)
+
+    xy_min = np.min(xyz[:, :2], axis=0)
+    xy_max = np.max(xyz[:, :2], axis=0)
+    xy_span = xy_max - xy_min
+    if np.any(xy_span <= 1e-9):
+        raise ValueError("切面 X/Y 范围无效，无法建立挂渣区域")
+
+    defect_mask = residual >= adaptive_threshold
+    defect_indices = np.flatnonzero(defect_mask)
+    result: Dict[str, Any] = {
+        "threshold_mm": round(float(adaptive_threshold), 6),
+        "noise_sigma_mm": round(float(noise_sigma), 6),
+        "residual_center_mm": float(residual_center),
+        "reference_plane": {
+            "a": round(float(coeffs[0]), 8),
+            "b": round(float(coeffs[1]), 8),
+            "c": round(float(coeffs[2]), 8),
+        },
+        "surface_bounds_mm": {
+            "x_min": float(xy_min[0]),
+            "x_max": float(xy_max[0]),
+            "y_min": float(xy_min[1]),
+            "y_max": float(xy_max[1]),
+        },
+        "candidate_point_count": int(len(defect_indices)),
+        "regions": [],
+    }
+    if len(defect_indices) == 0:
+        return result
+
+    cell = max(0.05, float(grid_cell_mm))
+    grid_w = int(np.floor(xy_span[0] / cell)) + 1
+    grid_h = int(np.floor(xy_span[1] / cell)) + 1
+    defect_xy = xyz[defect_indices, :2]
+    gx = np.clip(
+        np.floor((defect_xy[:, 0] - xy_min[0]) / cell).astype(np.int32),
+        0,
+        grid_w - 1,
+    )
+    gy = np.clip(
+        np.floor((defect_xy[:, 1] - xy_min[1]) / cell).astype(np.int32),
+        0,
+        grid_h - 1,
+    )
+    flat_cell = gy.astype(np.int64) * grid_w + gx
+    cell_counts = np.bincount(flat_cell, minlength=grid_w * grid_h).reshape(
+        grid_h,
+        grid_w,
+    )
+    occupied = cell_counts >= 2
+
+    # Bridge sub-millimetre holes so one physical dross patch is not returned
+    # as dozens of boxes. Bounding boxes are later measured from real points,
+    # not from this expanded grid.
+    radius = max(0, int(np.ceil(float(merge_gap_mm) / cell)))
+    expanded = occupied.copy()
+    if radius:
+        source = occupied
+        for dy in range(-radius, radius + 1):
+            y_src0 = max(0, -dy)
+            y_src1 = min(grid_h, grid_h - dy)
+            y_dst0 = max(0, dy)
+            y_dst1 = min(grid_h, grid_h + dy)
+            for dx in range(-radius, radius + 1):
+                x_src0 = max(0, -dx)
+                x_src1 = min(grid_w, grid_w - dx)
+                x_dst0 = max(0, dx)
+                x_dst1 = min(grid_w, grid_w + dx)
+                expanded[y_dst0:y_dst1, x_dst0:x_dst1] |= source[
+                    y_src0:y_src1,
+                    x_src0:x_src1,
+                ]
+
+    labels = np.zeros((grid_h, grid_w), dtype=np.int32)
+    pending = {tuple(v) for v in np.argwhere(expanded)}
+    label = 0
+    while pending:
+        label += 1
+        seed = pending.pop()
+        labels[seed] = label
+        queue = [seed]
+        for cy, cx in queue:
+            for ny in range(max(0, cy - 1), min(grid_h, cy + 2)):
+                for nx in range(max(0, cx - 1), min(grid_w, cx + 2)):
+                    neighbor = (ny, nx)
+                    if neighbor in pending:
+                        pending.remove(neighbor)
+                        labels[ny, nx] = label
+                        queue.append(neighbor)
+
+    point_labels = labels[gy, gx]
+    regions = []
+    pad_mm = max(cell, 0.25)
+    for component_id in range(1, label + 1):
+        local = point_labels == component_id
+        point_count = int(np.count_nonzero(local))
+        if point_count < 12:
+            continue
+        component_cells = np.unique(flat_cell[local])
+        area_mm2 = float(len(component_cells) * cell * cell)
+        if area_mm2 < float(min_area_mm2):
+            continue
+
+        component_points = defect_xy[local]
+        component_residual = residual[defect_indices[local]]
+        lo = np.maximum(np.min(component_points, axis=0) - pad_mm, xy_min)
+        hi = np.minimum(np.max(component_points, axis=0) + pad_mm, xy_max)
+        normalized = np.array(
+            [
+                (lo[0] - xy_min[0]) / xy_span[0],
+                (lo[1] - xy_min[1]) / xy_span[1],
+                (hi[0] - xy_min[0]) / xy_span[0],
+                (hi[1] - xy_min[1]) / xy_span[1],
+            ],
+            dtype=float,
+        )
+        normalized = np.clip(normalized, 0.0, 1.0)
+        regions.append(
+            {
+                "point_count": point_count,
+                "area_mm2": round(area_mm2, 4),
+                "max_height_mm": round(float(np.max(component_residual)), 4),
+                "mean_height_mm": round(float(np.mean(component_residual)), 4),
+                "bbox_mm": {
+                    "x_min": float(lo[0]),
+                    "y_min": float(lo[1]),
+                    "x_max": float(hi[0]),
+                    "y_max": float(hi[1]),
+                },
+                "bbox_normalized": {
+                    "x_min": float(normalized[0]),
+                    "y_min": float(normalized[1]),
+                    "x_max": float(normalized[2]),
+                    "y_max": float(normalized[3]),
+                },
+            }
+        )
+
+    regions.sort(
+        key=lambda item: (item["area_mm2"], item["max_height_mm"]),
+        reverse=True,
+    )
+    result["regions"] = regions[: max(1, int(max_regions))]
+    return result
+
+
+def build_protrusion_region_mask(
+    pts: np.ndarray,
+    detection: Dict[str, Any],
+    region_index: int = 0,
+) -> np.ndarray:
+    """Classify rendered points belonging to one detected 3D protrusion.
+
+    A point is highlighted only when it lies inside the connected region's
+    XY extent *and* exceeds the same fitted-plane height threshold used by the
+    detector.  This produces a point-level mask rather than a rectangular box.
+    """
+    if pts is None or getattr(pts, "ndim", 0) != 2 or pts.shape[1] < 3:
+        raise ValueError("点云数据必须是包含 X、Y、Z 的二维数组")
+
+    mask = np.zeros(len(pts), dtype=bool)
+    regions = detection.get("regions") or []
+    if not regions or region_index < 0 or region_index >= len(regions):
+        return mask
+
+    plane = detection.get("reference_plane") or {}
+    try:
+        a = float(plane["a"])
+        b = float(plane["b"])
+        c = float(plane["c"])
+        center = float(detection.get("residual_center_mm", 0.0))
+        threshold = float(detection["threshold_mm"])
+        bbox = regions[region_index]["bbox_mm"]
+        x_min = float(bbox["x_min"])
+        x_max = float(bbox["x_max"])
+        y_min = float(bbox["y_min"])
+        y_max = float(bbox["y_max"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("挂渣检测结果缺少生成 3D mask 所需的数据") from exc
+
+    xyz = np.asarray(pts[:, :3], dtype=np.float64)
+    finite = np.all(np.isfinite(xyz), axis=1)
+    heights = xyz[:, 2] - (a * xyz[:, 0] + b * xyz[:, 1] + c) - center
+    mask = (
+        finite
+        & (xyz[:, 0] >= x_min)
+        & (xyz[:, 0] <= x_max)
+        & (xyz[:, 1] >= y_min)
+        & (xyz[:, 1] <= y_max)
+        & (heights >= threshold)
+    )
+    return mask
+
+
+def detect_workpiece_image_roi(image_path: str, target_width: int = 792) -> Dict[str, Any]:
+    """Locate the workpiece rectangle in the fixed inspection-camera view.
+
+    The fixture is dark and the workpiece carries substantially more texture.
+    A downscaled gradient map finds a seed on the workpiece; smoothed intensity
+    projections then expand the seed to the four physical workpiece edges.
+    """
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QImage
+
+    source = QImage(image_path)
+    if source.isNull():
+        raise ValueError(f"无法读取对应的 2D 图像: {image_path}")
+    original_width = source.width()
+    original_height = source.height()
+    scale = min(1.0, float(target_width) / max(1, original_width))
+    if scale < 1.0:
+        image = source.scaledToWidth(
+            max(200, int(round(original_width * scale))),
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    else:
+        image = source
+    gray = image.convertToFormat(QImage.Format.Format_Grayscale8)
+    buffer = gray.bits().asstring(gray.sizeInBytes())
+    pixels = np.frombuffer(buffer, dtype=np.uint8).reshape(
+        gray.height(),
+        gray.bytesPerLine(),
+    )[:, : gray.width()].astype(np.float64)
+    height, width = pixels.shape
+
+    gradient = np.zeros_like(pixels)
+    gradient[:, 1:] += np.abs(pixels[:, 1:] - pixels[:, :-1])
+    gradient[1:, :] += np.abs(pixels[1:, :] - pixels[:-1, :])
+    kernel = max(15, int(round(width * 0.032)))
+    integral = np.pad(gradient, ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    local_texture = (
+        integral[kernel:, kernel:]
+        - integral[:-kernel, kernel:]
+        - integral[kernel:, :-kernel]
+        + integral[:-kernel, :-kernel]
+    ) / float(kernel * kernel)
+
+    x0 = int(0.25 * width)
+    x1 = max(x0 + 1, int(0.60 * width) - kernel + 1)
+    y0 = int(0.40 * height)
+    y1 = max(y0 + 1, int(0.72 * height) - kernel + 1)
+    search = local_texture[y0:y1, x0:x1]
+    if search.size == 0:
+        raise ValueError("2D 图像尺寸不足，无法定位工件")
+    seed_y, seed_x = np.unravel_index(np.argmax(search), search.shape)
+    seed_x += x0 + kernel // 2
+    seed_y += y0 + kernel // 2
+
+    def projection_bounds(
+        profile: np.ndarray,
+        seed: int,
+        span: int,
+    ) -> tuple[int, int]:
+        lo = max(0, seed - span)
+        hi = min(len(profile), seed + span + 1)
+        values = profile[lo:hi]
+        smooth_width = max(5, int(round(len(profile) * 0.009)))
+        if smooth_width % 2 == 0:
+            smooth_width += 1
+        smooth = np.convolve(
+            values,
+            np.ones(smooth_width) / smooth_width,
+            mode="same",
+        )
+        baseline = float(np.percentile(smooth, 25))
+        peak = float(np.percentile(smooth, 85))
+        threshold = baseline + max(2.5, 0.28 * (peak - baseline))
+        mask = smooth > threshold
+
+        # Close narrow dark gaps such as the laser-cut slit itself.
+        index = 0
+        max_gap = max(4, int(round(len(profile) * 0.010)))
+        while index < len(mask):
+            if mask[index]:
+                index += 1
+                continue
+            gap_start = index
+            while index < len(mask) and not mask[index]:
+                index += 1
+            if (
+                gap_start > 0
+                and index < len(mask)
+                and index - gap_start <= max_gap
+            ):
+                mask[gap_start:index] = True
+
+        runs = []
+        index = 0
+        while index < len(mask):
+            if not mask[index]:
+                index += 1
+                continue
+            run_start = index
+            while index < len(mask) and mask[index]:
+                index += 1
+            runs.append((run_start + lo, index + lo))
+        if not runs:
+            return max(0, seed - span // 2), min(len(profile), seed + span // 2)
+        containing = [run for run in runs if run[0] <= seed < run[1]]
+        if containing:
+            return max(containing, key=lambda run: run[1] - run[0])
+        return min(runs, key=lambda run: abs((run[0] + run[1]) / 2.0 - seed))
+
+    y_band = pixels[
+        max(0, seed_y - int(0.07 * height)) :
+        min(height, seed_y + int(0.07 * height) + 1)
+    ]
+    roi_x0, roi_x1 = projection_bounds(
+        np.mean(y_band, axis=0),
+        seed_x,
+        int(0.18 * width),
+    )
+    x_band = pixels[:, roi_x0:roi_x1]
+    roi_y0, roi_y1 = projection_bounds(
+        np.mean(x_band, axis=1),
+        seed_y,
+        int(0.22 * height),
+    )
+
+    inverse_scale_x = original_width / float(width)
+    inverse_scale_y = original_height / float(height)
+    bbox = {
+        "x_min": int(round(roi_x0 * inverse_scale_x)),
+        "y_min": int(round(roi_y0 * inverse_scale_y)),
+        "x_max": int(round(roi_x1 * inverse_scale_x)),
+        "y_max": int(round(roi_y1 * inverse_scale_y)),
+    }
+    return {
+        "image_width": int(original_width),
+        "image_height": int(original_height),
+        "workpiece_bbox_px": bbox,
+        "method": "fixed-fixture-texture-projection",
+    }
+
+
+def map_protrusions_to_image(
+    detection: Dict[str, Any],
+    image_roi: Dict[str, Any],
+    transform: str = "rotate_ccw",
+    padding_px: int = 8,
+) -> Dict[str, Any]:
+    """Project normalized 3D protrusion boxes into the 2D workpiece ROI."""
+    roi = image_roi["workpiece_bbox_px"]
+    roi_width = max(1.0, float(roi["x_max"] - roi["x_min"]))
+    roi_height = max(1.0, float(roi["y_max"] - roi["y_min"]))
+    image_width = int(image_roi["image_width"])
+    image_height = int(image_roi["image_height"])
+
+    def transform_point(x: float, y: float) -> tuple[float, float]:
+        if transform == "rotate_ccw":
+            return 1.0 - y, x
+        if transform == "rotate_cw":
+            return y, 1.0 - x
+        if transform == "flip_x":
+            return 1.0 - x, y
+        if transform == "flip_y":
+            return x, 1.0 - y
+        return x, y
+
+    boxes = []
+    for index, region in enumerate(detection.get("regions", []), start=1):
+        box = region["bbox_normalized"]
+        corners = [
+            transform_point(box["x_min"], box["y_min"]),
+            transform_point(box["x_min"], box["y_max"]),
+            transform_point(box["x_max"], box["y_min"]),
+            transform_point(box["x_max"], box["y_max"]),
+        ]
+        u_values = [point[0] for point in corners]
+        v_values = [point[1] for point in corners]
+        x_min = int(round(roi["x_min"] + min(u_values) * roi_width))
+        x_max = int(round(roi["x_min"] + max(u_values) * roi_width))
+        y_min = int(round(roi["y_min"] + min(v_values) * roi_height))
+        y_max = int(round(roi["y_min"] + max(v_values) * roi_height))
+        x_min = max(0, x_min - int(padding_px))
+        y_min = max(0, y_min - int(padding_px))
+        x_max = min(image_width - 1, x_max + int(padding_px))
+        y_max = min(image_height - 1, y_max + int(padding_px))
+        boxes.append(
+            {
+                "label": f"挂渣 {index}",
+                "x_min": x_min,
+                "y_min": y_min,
+                "x_max": x_max,
+                "y_max": y_max,
+                "max_height_mm": region["max_height_mm"],
+                "mean_height_mm": region["mean_height_mm"],
+                "area_mm2": region["area_mm2"],
+            }
+        )
+    return {
+        **image_roi,
+        "transform": transform,
+        "threshold_mm": detection["threshold_mm"],
+        "boxes": boxes,
+    }
+
 def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
     """
     Scans a local directory for files, automatically associates them to experiment IDs
@@ -1237,7 +1727,8 @@ def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
         "point_cloud_back": ["back", "hou", "houqiemian", "pc_back", "pc2", "02mian", "2mian"],
         "point_cloud_left": ["left", "zuo", "zuoqiemian", "pc_left", "pc3", "03mian", "3mian"],
         "point_cloud_right": ["right", "you", "youqiemian", "pc_right", "pc4", "04mian", "4mian"],
-        "point_cloud_dross": ["dross", "slag", "dizha", "guazha", "pc_dross", "pc5", "up", "shang"]
+        "point_cloud_top": ["top", "shang", "shangbiaomian", "pc_top", "pc_up", "up"],
+        "point_cloud_dross": ["dross", "slag", "dizha", "guazha", "pc_dross", "pc_down", "pc5", "05mian", "5mian", "down", "xia", "bottom"]
     }
     
     img_mapping = {
@@ -1245,8 +1736,60 @@ def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
         "image_back": ["back", "hou", "houqiemian", "img_back", "img2", "02mian", "2mian"],
         "image_left": ["left", "zuo", "img_left", "img3", "03mian", "3mian"],
         "image_right": ["right", "you", "img_right", "img4", "04mian", "4mian"],
-        "image_top": ["top", "shang", "img_top", "img5", "up"],
-        "image_bottom": ["bottom", "xia", "img_bottom", "img6"]
+        "image_top": ["top", "shang", "shangbiaomian", "img_top", "img5", "up", "luminance_up", "up_luminance"],
+        "image_bottom": ["bottom", "xia", "xiabiaomian", "img_bottom", "img6", "down", "luminance_down", "down_luminance"]
+    }
+
+
+def import_luminance_images(episode_id: str, file_paths: List[str]) -> Dict[str, Any]:
+    """
+    Accepts a list of selected image files (including Keyence TIF / Luminance images),
+    automatically detects orientation keywords ('up'/'top'/'shang' -> image_top; 'down'/'bottom'/'xia'/'dross' -> image_bottom),
+    converts TIF to PNG preview if needed, saves them to inspections directory, and updates DB.
+    """
+    if not episode_id:
+        return {"status": "error", "message": "未指定试验 ID"}
+    if not file_paths:
+        return {"status": "error", "message": "未选择任何亮度图文件"}
+
+    imported_count = 0
+    assigned_slots = {}
+    
+    up_keywords = ["up", "top", "shang", "shangbiaomian", "05mian", "5mian", "5"]
+    down_keywords = ["down", "bottom", "xia", "xiabiaomian", "dross", "slag", "dizha", "guazha", "06mian", "6mian", "6"]
+
+    runs = get_all_runs()
+    run = next((r for r in runs if r["episode_id"] == episode_id), {})
+
+    for src_path in file_paths:
+        if not src_path or not os.path.exists(src_path):
+            continue
+        filename = os.path.basename(src_path).lower()
+        
+        target_slot = None
+        if any(kw in filename for kw in up_keywords):
+            target_slot = "image_top"
+        elif any(kw in filename for kw in down_keywords):
+            target_slot = "image_bottom"
+        else:
+            # Fallback if no direction keyword specified in filename
+            if "image_top" not in assigned_slots and not run.get("image_top"):
+                target_slot = "image_top"
+            elif "image_bottom" not in assigned_slots and not run.get("image_bottom"):
+                target_slot = "image_bottom"
+            else:
+                target_slot = "image_top"
+                
+        rel_path = save_local_inspection_file(episode_id, target_slot, src_path)
+        if rel_path:
+            imported_count += 1
+            assigned_slots[target_slot] = os.path.basename(rel_path)
+
+    return {
+        "status": "success",
+        "imported_count": imported_count,
+        "assigned_slots": assigned_slots,
+        "message": f"成功选择导入 {imported_count} 个亮度图文件"
     }
 
     archived_count = 0
@@ -1266,7 +1809,7 @@ def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
 
         normalized_filename = normalize(filename)
         
-        # 1. Try matching by block/trial number index (e.g. "01kuai" matches "SY-001-5-6-6")
+        # 1. Try matching by block/trial number index (e.g. "01kuai" matches "SY-n001-v5-p6-f6")
         matched_id = None
         
         # Extract number from filename (e.g. "01" from "01kuai-01mian.pcd" -> 1)
@@ -1279,13 +1822,8 @@ def auto_archive_local_directory(src_dir: str) -> Dict[str, Any]:
             # Find the episode_id that has the matching sequence number
             for eid in episode_ids:
                 eid_num = None
-                # Extract number from episode_id parts separated by hyphens (e.g. "001" from "SY-001-5-6-6" -> 1)
-                parts = eid.split("-")
-                if len(parts) >= 2 and parts[0].upper() == "SY":
-                    try:
-                        eid_num = int(parts[1])
-                    except ValueError:
-                        pass
+                # Supports both the legacy SY-001 form and the new SY-n001 form.
+                eid_num = extract_episode_number(eid)
                 if eid_num is None:
                     # Fallback regex numeric extraction
                     num_match = re.search(r'\d+', eid)

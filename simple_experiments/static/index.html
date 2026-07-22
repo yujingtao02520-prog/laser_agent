@@ -70,7 +70,7 @@
                 </div>
             </section>
 
-            <div class="main-grid">
+            <div class="main-grid preview-workspace-grid">
             <!-- 参数录入表单 -->
             <section class="form-container glass-card">
                 <div class="card-header">
@@ -81,7 +81,7 @@
                     <div class="form-grid">
                         <div class="form-group col-span-2">
                             <label for="input-episode-id">试验名称/ID (选填)</label>
-                            <input type="text" id="input-episode-id" placeholder="例如 SY-5-6-6-001 (留空则自动生成)">
+                            <input type="text" id="input-episode-id" placeholder="例如 SY-n001-v5.5-p8-f8 (留空则自动生成)">
                         </div>
                         <div class="form-group">
                             <label for="input-power">激光功率 (%)</label>
@@ -209,23 +209,7 @@
                         </div>
                     </div>
 
-                    <div style="flex: 1; min-height: 250px; overflow-y: auto; padding-right: 4px;">
-                        <h4 style="margin-bottom: 0.75rem; color: var(--text-muted); font-size: 0.85rem; letter-spacing: 0.5px;">已归档文件列表:</h4>
-                        <div id="preview-file-slots" style="display: flex; flex-direction: column; gap: 0.6rem;">
-                            <!-- Dynamically loaded by JS -->
-                        </div>
-                    </div>
-                    
-                    <div class="card-header" style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--card-border);">
-                        <h2><i class="fa-solid fa-cloud-arrow-up"></i> 一键批量分发归档</h2>
-                    </div>
-                    <div id="web-dropzone" onclick="document.getElementById('web-bulk-file-input').click()" style="border: 2px dashed var(--card-border); border-radius: 8px; padding: 1.25rem 0.5rem; text-align: center; cursor: pointer; transition: all 0.25s ease; background: rgba(0,0,0,0.15); margin-bottom: 0.5rem;">
-                        <i class="fa-solid fa-file-shield" style="font-size: 1.5rem; color: var(--text-muted); margin-bottom: 0.4rem; display: block;"></i>
-                        <span style="font-size: 0.78rem; color: var(--text-muted);">拖拽 2D图片/3D点云 文件至此处，或 <strong style="color: var(--primary);">点击上传</strong></span>
-                        <input type="file" id="web-bulk-file-input" multiple onchange="handleBulkFilesSelected()" style="display: none;">
-                    </div>
-
-                    <div class="card-header" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--card-border);">
+                    <div class="card-header preview-control-header">
                         <h2><i class="fa-solid fa-calculator"></i> 三维点云处理控制台</h2>
                     </div>
                     <div class="stats-grid" style="grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem;">
@@ -254,6 +238,16 @@
                             </div>
                         </div>
                     </div>
+                    <div class="preview-primary-actions">
+                        <button class="btn btn-primary btn-sm" id="web-btn-morphology"
+                                onclick="webAnalyzeSurfaceMorphology()" disabled>
+                            计算切面形貌 / 粗糙度
+                        </button>
+                        <button class="btn btn-primary btn-sm" id="web-btn-map-dross"
+                                onclick="webMapDrossTo2D()" disabled>
+                            3D 凸起映射到 2D 挂渣框
+                        </button>
+                    </div>
                     <div style="display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.75rem;">
                         <label for="web-core-ratio" style="white-space: nowrap; font-size: 0.82rem; color: var(--text-muted);">核心区域</label>
                         <input type="range" id="web-core-ratio" min="10" max="100" step="5" value="50"
@@ -276,28 +270,67 @@
                         <button class="btn btn-secondary-outline btn-sm" id="web-btn-downsample" onclick="webDownsamplePointCloud()" style="flex: 1;" disabled>降采样(5k)</button>
                         <button class="btn btn-secondary-outline btn-sm" id="web-btn-reset" onclick="webResetPointCloud()" style="flex: 1;" disabled>重置</button>
                     </div>
-                    <button class="btn btn-primary btn-sm" id="web-btn-morphology"
-                            onclick="webAnalyzeSurfaceMorphology()" style="width: 100%; margin-top: 0.75rem;" disabled>
-                        计算切面形貌
-                    </button>
-                    <div id="web-morphology-results"
-                         style="margin-top: 0.75rem; max-height: 240px; overflow-y: auto; font-size: 0.78rem; color: var(--text-muted);">
-                        提取真实切面后，可计算 Sa、Sq、Sz 等形貌指标
+                    <div class="preview-file-browser">
+                        <h4>已归档文件列表:</h4>
+                        <div id="preview-file-slots">
+                            <!-- Dynamically loaded by JS -->
+                        </div>
+                    </div>
+
+                    <div class="card-header preview-upload-header">
+                        <h2><i class="fa-solid fa-cloud-arrow-up"></i> 一键批量分发归档</h2>
+                    </div>
+                    <div id="web-dropzone" onclick="document.getElementById('web-bulk-file-input').click()" class="preview-dropzone">
+                        <i class="fa-solid fa-file-shield"></i>
+                        <span>拖拽 2D图片/3D点云 文件至此处，或 <strong>点击上传</strong></span>
+                        <input type="file" id="web-bulk-file-input" multiple onchange="handleBulkFilesSelected()" style="display: none;">
                     </div>
                 </section>
 
                 <!-- 右面板: 可视化渲染视窗 -->
-                <section class="table-container glass-card" style="display: flex; flex-direction: column; min-height: 580px;">
+                <section class="table-container glass-card preview-results-panel">
                     <div class="card-header" style="padding-bottom: 0.5rem;">
-                        <h2 id="preview-canvas-title"><i class="fa-solid fa-cube"></i> 检测结果可视化窗口</h2>
+                        <h2 id="preview-canvas-title"><i class="fa-solid fa-cube"></i> 3D 点云与 2D 挂渣映射</h2>
                     </div>
-                    <div id="preview-canvas-container" style="flex: 1; background: #0b0f19; border: 1px solid var(--card-border); border-radius: 8px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
-                        <div id="preview-placeholder" style="color: var(--text-muted); font-size: 0.9rem; text-align: center;">
-                            <i class="fa-solid fa-compass-drafting" style="font-size: 2rem; margin-bottom: 0.75rem; display: block; color: rgba(255,255,255,0.07);"></i>
-                            请在左侧选择需要预览的检测文件 (.pcd / .asc / .csv / .tif)
+                    <div id="preview-canvas-container" class="preview-dual-view">
+                        <div class="preview-view-pane" id="preview-3d-pane">
+                            <div class="preview-pane-title preview-pane-title-row">
+                                <span><i class="fa-solid fa-cube"></i> 3D 点云（可旋转/缩放）</span>
+                                <button type="button" id="web-btn-toggle-dross-mask"
+                                        class="mask-toggle-btn hidden"
+                                        onclick="toggleDrossMask3D()">
+                                    隐藏起渣 mask
+                                </button>
+                            </div>
+                            <div class="preview-pane-body">
+                                <div id="preview-3d-placeholder" class="preview-pane-placeholder">
+                                    请选择 3D 点云文件
+                                </div>
+                                <div id="webgl-canvas" class="hidden"></div>
+                                <div id="dross-mask-legend" class="dross-mask-legend hidden">
+                                    <span class="dross-mask-dot"></span>
+                                    起渣面 mask：<strong data-mask-count>0</strong> 点
+                                </div>
+                            </div>
                         </div>
-                        <div id="webgl-canvas" class="hidden" style="width: 100%; height: 100%; cursor: grab;"></div>
-                        <img id="image-viewer" class="hidden" style="max-width: 95%; max-height: 95%; object-fit: contain; border-radius: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); cursor: grab; user-select: none; -webkit-user-drag: none; transform-origin: center center;">
+                        <div class="preview-view-pane" id="preview-image-pane">
+                            <div class="preview-pane-title"><i class="fa-solid fa-vector-square"></i> 2D 图像 / 挂渣框</div>
+                            <div class="preview-pane-body">
+                                <div id="preview-2d-placeholder" class="preview-pane-placeholder">
+                                    映射完成后在此显示 2D 挂渣框
+                                </div>
+                                <canvas id="image-viewer" class="hidden"></canvas>
+                            </div>
+                        </div>
+                        <div class="morphology-results-card">
+                            <div class="morphology-results-title">
+                                <i class="fa-solid fa-chart-line"></i>
+                                表面形貌与挂渣检测结果
+                            </div>
+                            <div id="web-morphology-results">
+                                提取真实切面后，可计算 Sa、Sq、Sz 等形貌指标
+                            </div>
+                        </div>
                     </div>
                 </section>
             </div>
@@ -312,7 +345,7 @@
                 <button class="close-btn" onclick="closeQualityModal()"><i class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-meta">
-                <span id="modal-episode-id">LC_CS30_AIR_L9_0001</span>
+                <span id="modal-episode-id">SY-n001-v5.5-p8-f8</span>
                 <span id="modal-params-summary">54kW | 0.8m/min | 1.5MPa | -9mm</span>
             </div>
             
@@ -405,7 +438,12 @@
                             <div class="file-status" id="status-pc-right">未归档</div>
                         </div>
                         <div class="form-group">
-                            <label for="file-pc-dross">挂渣底面点云 (.ply/.pcd)</label>
+                            <label for="file-pc-top">上表面点云 (Up/Top) (.ply/.pcd)</label>
+                            <input type="file" id="file-pc-top" accept=".ply,.pcd,.xyz,.pts" class="form-control-file">
+                            <div class="file-status" id="status-pc-top">未归档</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="file-pc-dross">下切面挂渣点云 (Down/Dross) (.ply/.pcd)</label>
                             <input type="file" id="file-pc-dross" accept=".ply,.pcd,.xyz,.pts" class="form-control-file">
                             <div class="file-status" id="status-pc-dross">未归档</div>
                         </div>
@@ -430,12 +468,12 @@
                             <div class="file-status" id="status-img-right">未归档</div>
                         </div>
                         <div class="form-group">
-                            <label for="file-img-top">上表面图像 (.jpg/.png)</label>
+                            <label for="file-img-top">上表面图像 (Up/Top) (.jpg/.png)</label>
                             <input type="file" id="file-img-top" accept="image/*" class="form-control-file">
                             <div class="file-status" id="status-img-top">未归档</div>
                         </div>
                         <div class="form-group">
-                            <label for="file-img-bottom">下表面图像 (.jpg/.png)</label>
+                            <label for="file-img-bottom">下表面图像 (Down/Bottom) (.jpg/.png)</label>
                             <input type="file" id="file-img-bottom" accept="image/*" class="form-control-file">
                             <div class="file-status" id="status-img-bottom">未归档</div>
                         </div>
@@ -462,7 +500,7 @@
                 <div class="form-grid">
                     <div class="form-group col-span-2">
                         <label for="edit-episode-id">试验名称/ID (必须唯一)</label>
-                        <input type="text" id="edit-episode-id" required placeholder="例如 LC_CS30_AIR_L9_0010">
+                        <input type="text" id="edit-episode-id" required placeholder="例如 SY-n001-v5.5-p8-f8">
                     </div>
                     <div class="form-group">
                         <label for="edit-power">激光功率 (%)</label>
