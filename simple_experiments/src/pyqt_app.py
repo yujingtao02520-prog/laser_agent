@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QSlider,
     QSizePolicy,
     QSplitter,
     QTableWidget,
@@ -408,6 +409,249 @@ class EditParamsDialog(QDialog):
             "gas": self.gas.text().strip(),
             "nozzle_height_mm": self.nozzle_height.value(),
         }
+
+class SectionExtractorDialog(QDialog):
+    def __init__(self, file_path: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("交互式切面裁剪提取器")
+        self.resize(1000, 700)
+        self.setModal(True)
+        
+        self.file_path = file_path
+        # Load full points (we will save the full cropped points, but preview downsampled)
+        self.full_points = gui_db.parse_point_cloud(file_path)
+        if len(self.full_points) == 0:
+            QMessageBox.warning(self, "读取失败", "无法加载点云数据，或点云为空")
+            self.reject()
+            return
+            
+        # Get coordinate bounds
+        self.x_bounds = (float(np.min(self.full_points[:, 0])), float(np.max(self.full_points[:, 0])))
+        self.y_bounds = (float(np.min(self.full_points[:, 1])), float(np.max(self.full_points[:, 1])))
+        self.z_bounds = (float(np.min(self.full_points[:, 2])), float(np.max(self.full_points[:, 2])))
+        
+        # Current slider bounds (in coordinates)
+        self.curr_x_min, self.curr_x_max = self.x_bounds
+        self.curr_y_min, self.curr_y_max = self.y_bounds
+        self.curr_z_min, self.curr_z_max = self.z_bounds
+        
+        self._init_ui()
+        self._update_preview()
+
+    def _init_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(12)
+        
+        # Left Panel: Controls
+        control_panel = QGroupBox("裁剪参数调整")
+        control_panel.setFixedWidth(320)
+        control_layout = QVBoxLayout(control_panel)
+        control_layout.setSpacing(12)
+        
+        # Slider helper function
+        def create_slider_row(label_text, bounds):
+            lbl = QLabel(f"{label_text}:")
+            lbl.setStyleSheet("font-weight: bold;")
+            
+            min_val, max_val = bounds
+            
+            slider_min = QSlider(Qt.Orientation.Horizontal)
+            slider_min.setRange(0, 1000)
+            slider_min.setValue(0)
+            
+            slider_max = QSlider(Qt.Orientation.Horizontal)
+            slider_max.setRange(0, 1000)
+            slider_max.setValue(1000)
+            
+            val_lbl = QLabel(f"{min_val:.2f} ~ {max_val:.2f}")
+            val_lbl.setStyleSheet("color: #38bdf8; font-size: 11px;")
+            
+            control_layout.addWidget(lbl)
+            control_layout.addWidget(slider_min)
+            control_layout.addWidget(slider_max)
+            control_layout.addWidget(val_lbl)
+            
+            return slider_min, slider_max, val_lbl
+            
+        self.sld_x_min, self.sld_x_max, self.lbl_x_val = create_slider_row("X 轴切片区间", self.x_bounds)
+        self.sld_y_min, self.sld_y_max, self.lbl_y_val = create_slider_row("Y 轴切片区间", self.y_bounds)
+        self.sld_z_min, self.sld_z_max, self.lbl_z_val = create_slider_row("Z 轴高度区间", self.z_bounds)
+        
+        # Connect slider events
+        for s in [self.sld_x_min, self.sld_x_max, self.sld_y_min, self.sld_y_max, self.sld_z_min, self.sld_z_max]:
+            s.valueChanged.connect(self._on_slider_changed)
+            
+        # Quick Actions
+        actions_group = QGroupBox("快速操作")
+        actions_layout = QVBoxLayout(actions_group)
+        actions_layout.setSpacing(8)
+        
+        btn_auto = QPushButton("自动估计并定位")
+        btn_auto.setObjectName("ghostButton")
+        btn_auto.clicked.connect(self._on_auto_estimate)
+        actions_layout.addWidget(btn_auto)
+        
+        btn_reset = QPushButton("重置为全选")
+        btn_reset.setObjectName("ghostButton")
+        btn_reset.clicked.connect(self._on_reset_clicked)
+        actions_layout.addWidget(btn_reset)
+        
+        control_layout.addWidget(actions_group)
+        control_layout.addStretch()
+        
+        # Bottom Save buttons
+        btn_layout = QHBoxLayout()
+        self.btn_save = QPushButton("确认裁剪并覆盖保存")
+        self.btn_save.setObjectName("primaryButton")
+        self.btn_save.clicked.connect(self._on_save_clicked)
+        
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setObjectName("ghostButton")
+        btn_cancel.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.btn_save)
+        btn_layout.addWidget(btn_cancel)
+        control_layout.addLayout(btn_layout)
+        
+        layout.addWidget(control_panel)
+        
+        # Right Panel: 3D Preview
+        preview_group = QGroupBox("3D 点云裁剪效果实时预览")
+        preview_layout = QVBoxLayout(preview_group)
+        preview_layout.setContentsMargins(4, 4, 4, 4)
+        
+        self.pc_viewer = PointCloudViewer()
+        preview_layout.addWidget(self.pc_viewer)
+        
+        # Tip label
+        tip_lbl = QLabel("💡 拖动左侧滑块，右侧视图会实时滤除区间外的杂点。确认后会将结果覆盖存回原文件。")
+        tip_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        preview_layout.addWidget(tip_lbl)
+        
+        layout.addWidget(preview_group, stretch=1)
+
+    def _get_slider_value(self, sld_min, sld_max, bounds):
+        min_c, max_c = bounds
+        range_c = max_c - min_c
+        
+        val_min = min_c + (sld_min.value() / 1000.0) * range_c
+        val_max = min_c + (sld_max.value() / 1000.0) * range_c
+        
+        # Keep min <= max
+        if val_min > val_max:
+            val_min, val_max = val_max, val_min
+            
+        return val_min, val_max
+
+    def _on_slider_changed(self):
+        self.curr_x_min, self.curr_x_max = self._get_slider_value(self.sld_x_min, self.sld_x_max, self.x_bounds)
+        self.curr_y_min, self.curr_y_max = self._get_slider_value(self.sld_y_min, self.sld_y_max, self.y_bounds)
+        self.curr_z_min, self.curr_z_max = self._get_slider_value(self.sld_z_min, self.sld_z_max, self.z_bounds)
+        
+        # Update text labels
+        self.lbl_x_val.setText(f"{self.curr_x_min:.2f} ~ {self.curr_x_max:.2f} (mm)")
+        self.lbl_y_val.setText(f"{self.curr_y_min:.2f} ~ {self.curr_y_max:.2f} (mm)")
+        self.lbl_z_val.setText(f"{self.curr_z_min:.2f} ~ {self.curr_z_max:.2f} (mm)")
+        
+        self._update_preview()
+
+    def _update_preview(self):
+        # Filter full points to show in preview
+        mask = (
+            (self.full_points[:, 0] >= self.curr_x_min) & (self.full_points[:, 0] <= self.curr_x_max) &
+            (self.full_points[:, 1] >= self.curr_y_min) & (self.full_points[:, 1] <= self.curr_y_max) &
+            (self.full_points[:, 2] >= self.curr_z_min) & (self.full_points[:, 2] <= self.curr_z_max)
+        )
+        filtered = self.full_points[mask]
+        
+        # Downsample to 10,000 for preview performance
+        if len(filtered) > 10000:
+            step = len(filtered) // 10000
+            filtered = filtered[::step][:10000]
+            
+        self.pc_viewer.set_points(filtered)
+        self.pc_viewer.update()
+
+    def _on_reset_clicked(self):
+        self.sld_x_min.setValue(0)
+        self.sld_x_max.setValue(1000)
+        self.sld_y_min.setValue(0)
+        self.sld_y_max.setValue(1000)
+        self.sld_z_min.setValue(0)
+        self.sld_z_max.setValue(1000)
+        self._on_slider_changed()
+
+    def _on_auto_estimate(self):
+        # Auto estimate core bounds using existing API
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            res = gui_db.extract_full_resolution_surface(self.file_path, self.full_points)
+            QApplication.restoreOverrideCursor()
+            
+            # Map coordinates to slider values
+            xy_bounds = res["xy_bounds"]
+            
+            # Set X
+            x_min_val, x_max_val = xy_bounds["x_min"], xy_bounds["x_max"]
+            # Set Y
+            y_min_val, y_max_val = xy_bounds["y_min"], xy_bounds["y_max"]
+            
+            # Set Z (plane fitting residual height is a bit complex, so we estimate from Z coordinates of extracted surface)
+            surf_z = res["surface_points"][:, 2]
+            z_min_val, z_max_val = float(np.min(surf_z)), float(np.max(surf_z))
+            
+            # Helper to map coordinate back to slider value (0 to 1000)
+            def map_to_slider(val, bounds):
+                b_min, b_max = bounds
+                b_range = b_max - b_min
+                if b_range == 0:
+                    return 500
+                frac = (val - b_min) / b_range
+                return int(max(0, min(1000, frac * 1000)))
+                
+            self.sld_x_min.setValue(map_to_slider(x_min_val, self.x_bounds))
+            self.sld_x_max.setValue(map_to_slider(x_max_val, self.x_bounds))
+            self.sld_y_min.setValue(map_to_slider(y_min_val, self.y_bounds))
+            self.sld_y_max.setValue(map_to_slider(y_max_val, self.y_bounds))
+            self.sld_z_min.setValue(map_to_slider(z_min_val, self.z_bounds))
+            self.sld_z_max.setValue(map_to_slider(z_max_val, self.z_bounds))
+            
+            self._on_slider_changed()
+            QMessageBox.information(self, "自动估计成功", "已为您自动计算并定位到切面的核心高度与X/Y范围！")
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "估计失败", f"无法自动提取切面: {e}\n请使用滑块手动裁剪。")
+
+    def _on_save_clicked(self):
+        # Slice full-resolution point cloud
+        mask = (
+            (self.full_points[:, 0] >= self.curr_x_min) & (self.full_points[:, 0] <= self.curr_x_max) &
+            (self.full_points[:, 1] >= self.curr_y_min) & (self.full_points[:, 1] <= self.curr_y_max) &
+            (self.full_points[:, 2] >= self.curr_z_min) & (self.full_points[:, 2] <= self.curr_z_max)
+        )
+        final_points = self.full_points[mask]
+        
+        if len(final_points) == 0:
+            QMessageBox.warning(self, "无法保存", "当前裁剪区间内没有任何点！")
+            return
+            
+        confirm = QMessageBox.question(
+            self,
+            "确认保存",
+            f"确认保存该裁剪区间？\n将保留 {len(final_points):,} 个点并覆盖原点云文件。\n此操作不可逆！",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            try:
+                success = gui_db.save_point_cloud_data(self.file_path, final_points)
+                if success:
+                    QMessageBox.information(self, "保存成功", "点云裁剪切面提取成功，已写入原归档路径。")
+                    self.accept()
+                else:
+                    QMessageBox.critical(self, "保存失败", "写入文件出错！")
+            except Exception as e:
+                QMessageBox.critical(self, "保存错误", f"保存过程发生错误: {e}")
 
 class ImageViewer(QScrollArea):
     def __init__(self, parent=None):
@@ -947,50 +1191,70 @@ class MainWindow(QMainWindow):
         self.btn_import_luminance.clicked.connect(self._on_import_luminance_clicked)
         left_layout.addWidget(self.btn_import_luminance)
         
-        # Point Cloud processing controls
-        proc_box = QGroupBox("三维点云处理控制台")
-        proc_layout = QVBoxLayout(proc_box)
-        proc_layout.setSpacing(6)
+        # Right Panel: Canvas & Bottom Console
+        right_panel = QGroupBox("检测结果可视化窗口")
+        right_panel.setObjectName("panel")
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(6, 6, 6, 6)
+        right_layout.setSpacing(10)
         
-        self.lbl_points_count = QLabel("点数: --")
-        self.lbl_bbox_x = QLabel("X 尺寸 (宽): --")
-        self.lbl_bbox_y = QLabel("Y 尺寸 (高): --")
-        self.lbl_bbox_z = QLabel("Z 尺寸 (深): --")
+        # Visualizers Splitter (3D + 2D)
+        visual_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        pc_group = QGroupBox("3D 点云（保留交互视图）")
+        pc_group_layout = QVBoxLayout(pc_group)
+        pc_group_layout.setContentsMargins(4, 4, 4, 4)
         
-        proc_layout.addWidget(self.lbl_points_count)
-        proc_layout.addWidget(self.lbl_bbox_x)
-        proc_layout.addWidget(self.lbl_bbox_y)
-        proc_layout.addWidget(self.lbl_bbox_z)
-
-        core_layout = QHBoxLayout()
-        core_layout.addWidget(QLabel("核心区域比例:"))
-        self.core_ratio_spin = QSpinBox()
-        self.core_ratio_spin.setRange(10, 100)
-        self.core_ratio_spin.setSingleStep(5)
-        self.core_ratio_spin.setValue(50)
-        self.core_ratio_spin.setSuffix("%")
-        self.core_ratio_spin.setEnabled(False)
-        core_layout.addWidget(self.core_ratio_spin)
-        self.btn_extract_core = QPushButton("提取核心区域")
-        self.btn_extract_core.setObjectName("primaryButton")
-        self.btn_extract_core.setEnabled(False)
-        self.btn_extract_core.clicked.connect(self._on_extract_core_clicked)
-        core_layout.addWidget(self.btn_extract_core, stretch=1)
-        proc_layout.addLayout(core_layout)
-
-        self.btn_adaptive_core = QPushButton("自适应识别并提取中心切面")
-        self.btn_adaptive_core.setObjectName("primaryButton")
-        self.btn_adaptive_core.setEnabled(False)
-        self.btn_adaptive_core.clicked.connect(self._on_adaptive_core_clicked)
-        proc_layout.addWidget(self.btn_adaptive_core)
-
-        self.btn_remove_spikes = QPushButton("提取真实切面层（去底面/毛刺）")
-        self.btn_remove_spikes.setObjectName("ghostButton")
-        self.btn_remove_spikes.setEnabled(False)
-        self.btn_remove_spikes.clicked.connect(self._on_remove_spikes_clicked)
-        proc_layout.addWidget(self.btn_remove_spikes)
+        self.dross_mask_visible = True
+        mask_toolbar = QHBoxLayout()
+        mask_toolbar.addStretch()
+        self.btn_toggle_dross_mask = QPushButton("显示起渣 mask")
+        self.btn_toggle_dross_mask.setObjectName("smallButton")
+        self.btn_toggle_dross_mask.setEnabled(False)
+        self.btn_toggle_dross_mask.clicked.connect(self._on_toggle_dross_mask_clicked)
+        mask_toolbar.addWidget(self.btn_toggle_dross_mask)
+        pc_group_layout.addLayout(mask_toolbar)
         
-        btn_layout = QHBoxLayout()
+        self.pc_stack = QStackedWidget()
+        self.pc_placeholder_lbl = QLabel("请选择 3D 点云文件")
+        self.pc_placeholder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pc_placeholder_lbl.setStyleSheet("color: #94a3b8; font-size: 13px;")
+        self.pc_stack.addWidget(self.pc_placeholder_lbl)
+        self.pc_viewer = PointCloudViewer()
+        self.pc_stack.addWidget(self.pc_viewer)
+        pc_group_layout.addWidget(self.pc_stack)
+
+        image_group = QGroupBox("2D 图像 / 挂渣标注")
+        image_group_layout = QVBoxLayout(image_group)
+        image_group_layout.setContentsMargins(4, 4, 4, 4)
+        
+        self.image_stack = QStackedWidget()
+        self.image_placeholder_lbl = QLabel("映射完成后在此显示 2D 挂渣框")
+        self.image_placeholder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_placeholder_lbl.setStyleSheet("color: #94a3b8; font-size: 13px;")
+        self.image_stack.addWidget(self.image_placeholder_lbl)
+        self.image_viewer = ImageViewer()
+        self.image_stack.addWidget(self.image_viewer)
+        image_group_layout.addWidget(self.image_stack)
+
+        visual_splitter.addWidget(pc_group)
+        visual_splitter.addWidget(image_group)
+        visual_splitter.setSizes([560, 440])
+        right_layout.addWidget(visual_splitter, stretch=1)
+
+        # Bottom Panel: Point Cloud Algorithms & Analysis Results
+        bottom_panel = QWidget()
+        bottom_layout = QHBoxLayout(bottom_panel)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(12)
+        
+        # 1. Point Cloud processing console (proc_box)
+        proc_box = QGroupBox("三维点云算法工具箱")
+        proc_box.setObjectName("panel")
+        proc_layout = QGridLayout(proc_box)
+        proc_layout.setContentsMargins(10, 10, 10, 10)
+        proc_layout.setSpacing(8)
+        
         self.btn_denoise = QPushButton("滤波降噪")
         self.btn_denoise.setObjectName("ghostButton")
         self.btn_denoise.setEnabled(False)
@@ -1006,94 +1270,105 @@ class MainWindow(QMainWindow):
         self.btn_reset_pc.setEnabled(False)
         self.btn_reset_pc.clicked.connect(self._on_reset_pc_clicked)
         
-        btn_layout.addWidget(self.btn_denoise)
-        btn_layout.addWidget(self.btn_downsample)
-        btn_layout.addWidget(self.btn_reset_pc)
-        proc_layout.addLayout(btn_layout)
-
+        proc_layout.addWidget(self.btn_denoise, 0, 0)
+        proc_layout.addWidget(self.btn_downsample, 0, 1)
+        proc_layout.addWidget(self.btn_reset_pc, 0, 2)
+        
+        core_ratio_lbl = QLabel("核心比例:")
+        core_ratio_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.core_ratio_spin = QSpinBox()
+        self.core_ratio_spin.setRange(10, 100)
+        self.core_ratio_spin.setSingleStep(5)
+        self.core_ratio_spin.setValue(50)
+        self.core_ratio_spin.setSuffix("%")
+        self.core_ratio_spin.setEnabled(False)
+        self.core_ratio_spin.setMinimumWidth(70)
+        
+        self.btn_extract_core = QPushButton("提取核心区域")
+        self.btn_extract_core.setObjectName("primaryButton")
+        self.btn_extract_core.setEnabled(False)
+        self.btn_extract_core.clicked.connect(self._on_extract_core_clicked)
+        
+        proc_layout.addWidget(core_ratio_lbl, 1, 0)
+        proc_layout.addWidget(self.core_ratio_spin, 1, 1)
+        proc_layout.addWidget(self.btn_extract_core, 1, 2)
+        
+        self.btn_adaptive_core = QPushButton("自适应识别并提取中心切面")
+        self.btn_adaptive_core.setObjectName("primaryButton")
+        self.btn_adaptive_core.setEnabled(False)
+        self.btn_adaptive_core.clicked.connect(self._on_adaptive_core_clicked)
+        
+        self.btn_remove_spikes = QPushButton("提取真实切面层（去底面/毛刺）")
+        self.btn_remove_spikes.setObjectName("ghostButton")
+        self.btn_remove_spikes.setEnabled(False)
+        self.btn_remove_spikes.clicked.connect(self._on_remove_spikes_clicked)
+        
+        proc_layout.addWidget(self.btn_adaptive_core, 2, 0, 1, 2)
+        proc_layout.addWidget(self.btn_remove_spikes, 2, 2)
+        
         self.btn_analyze_surface = QPushButton("计算切面形貌")
         self.btn_analyze_surface.setObjectName("primaryButton")
         self.btn_analyze_surface.setEnabled(False)
         self.btn_analyze_surface.clicked.connect(self._on_analyze_surface_clicked)
-        proc_layout.addWidget(self.btn_analyze_surface)
-
+        
         self.btn_map_dross = QPushButton("3D 凸起映射到 2D 挂渣框")
         self.btn_map_dross.setObjectName("primaryButton")
         self.btn_map_dross.setEnabled(False)
         self.btn_map_dross.clicked.connect(self._on_map_dross_clicked)
-        proc_layout.addWidget(self.btn_map_dross)
-
-        # Surface metrics and dross mapping are the primary actions; keep them
-        # directly below the point-cloud summary instead of at the panel foot.
-        proc_layout.insertWidget(4, self.btn_analyze_surface)
-        proc_layout.insertWidget(5, self.btn_map_dross)
-
+        
+        proc_layout.addWidget(self.btn_analyze_surface, 3, 0, 1, 1)
+        proc_layout.addWidget(self.btn_map_dross, 3, 1, 1, 2)
+        
+        self.btn_interactive_crop = QPushButton("💡 交互式切面裁剪提取器")
+        self.btn_interactive_crop.setObjectName("primaryButton")
+        self.btn_interactive_crop.setEnabled(False)
+        self.btn_interactive_crop.clicked.connect(self._on_interactive_crop_clicked)
+        proc_layout.addWidget(self.btn_interactive_crop, 4, 0, 1, 3)
+        
+        bottom_layout.addWidget(proc_box, stretch=4)
+        
+        # 2. Results & Metrics Console (results_group)
+        results_group = QGroupBox("切面形貌与挂渣检测结果")
+        results_group.setObjectName("panel")
+        results_group_layout = QHBoxLayout(results_group)
+        results_group_layout.setContentsMargins(10, 10, 10, 10)
+        results_group_layout.setSpacing(10)
+        
+        metrics_widget = QWidget()
+        metrics_layout = QVBoxLayout(metrics_widget)
+        metrics_layout.setContentsMargins(0, 0, 0, 0)
+        metrics_layout.setSpacing(4)
+        
+        self.lbl_points_count = QLabel("点数: --")
+        self.lbl_bbox_x = QLabel("X 尺寸 (宽): --")
+        self.lbl_bbox_y = QLabel("Y 尺寸 (高): --")
+        self.lbl_bbox_z = QLabel("Z 尺寸 (深): --")
+        self.lbl_points_count.setStyleSheet("font-weight: bold; color: #38bdf8;")
+        self.lbl_bbox_x.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_bbox_y.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_bbox_z.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        
+        metrics_layout.addWidget(self.lbl_points_count)
+        metrics_layout.addWidget(self.lbl_bbox_x)
+        metrics_layout.addWidget(self.lbl_bbox_y)
+        metrics_layout.addWidget(self.lbl_bbox_z)
+        metrics_layout.addStretch()
+        
         self.morphology_output = QTextEdit()
         self.morphology_output.setReadOnly(True)
-        self.morphology_output.setMinimumHeight(120)
         self.morphology_output.setPlaceholderText("提取真实切面后，可计算 Sa、Sq、Sz 等形貌指标")
-
-        # Put the processing controls above the long file list so they remain
-        # visible without scrolling to the bottom of the left panel.
-        left_layout.insertWidget(2, proc_box)
+        self.morphology_output.setStyleSheet("background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); color: #e2e8f0;")
         
-        # Right Panel: Canvas
-        right_panel = QGroupBox("检测结果可视化窗口")
-        right_panel.setObjectName("panel")
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(6, 6, 6, 6)
+        results_group_layout.addWidget(metrics_widget, stretch=1)
+        results_group_layout.addWidget(self.morphology_output, stretch=3)
         
-        visual_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        pc_group = QGroupBox("3D 点云（保留交互视图）")
-        pc_group_layout = QVBoxLayout(pc_group)
-        pc_group_layout.setContentsMargins(4, 4, 4, 4)
-        self.dross_mask_visible = True
-        mask_toolbar = QHBoxLayout()
-        mask_toolbar.addStretch()
-        self.btn_toggle_dross_mask = QPushButton("显示起渣 mask")
-        self.btn_toggle_dross_mask.setObjectName("smallButton")
-        self.btn_toggle_dross_mask.setEnabled(False)
-        self.btn_toggle_dross_mask.clicked.connect(
-            self._on_toggle_dross_mask_clicked
-        )
-        mask_toolbar.addWidget(self.btn_toggle_dross_mask)
-        pc_group_layout.addLayout(mask_toolbar)
-        self.pc_stack = QStackedWidget()
-        self.pc_placeholder_lbl = QLabel("请选择 3D 点云文件")
-        self.pc_placeholder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.pc_placeholder_lbl.setStyleSheet("color: #94a3b8; font-size: 13px;")
-        self.pc_stack.addWidget(self.pc_placeholder_lbl)
-        self.pc_viewer = PointCloudViewer()
-        self.pc_stack.addWidget(self.pc_viewer)
-        pc_group_layout.addWidget(self.pc_stack)
-
-        image_group = QGroupBox("2D 图像 / 挂渣标注")
-        image_group_layout = QVBoxLayout(image_group)
-        image_group_layout.setContentsMargins(4, 4, 4, 4)
-        self.image_stack = QStackedWidget()
-        self.image_placeholder_lbl = QLabel("映射完成后在此显示 2D 挂渣框")
-        self.image_placeholder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_placeholder_lbl.setStyleSheet("color: #94a3b8; font-size: 13px;")
-        self.image_stack.addWidget(self.image_placeholder_lbl)
-        self.image_viewer = ImageViewer()
-        self.image_stack.addWidget(self.image_viewer)
-        image_group_layout.addWidget(self.image_stack)
-
-        visual_splitter.addWidget(pc_group)
-        visual_splitter.addWidget(image_group)
-        visual_splitter.setSizes([560, 440])
-        right_layout.addWidget(visual_splitter, stretch=1)
-
-        results_group = QGroupBox("表面形貌与挂渣检测结果")
-        results_layout = QVBoxLayout(results_group)
-        results_layout.setContentsMargins(8, 8, 8, 8)
-        results_layout.addWidget(self.morphology_output)
-        right_layout.addWidget(results_group)
+        bottom_layout.addWidget(results_group, stretch=5)
+        
+        right_layout.addWidget(bottom_panel)
         
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
-        splitter.setSizes([380, 900])
+        splitter.setSizes([320, 960])
         
         layout.addWidget(splitter)
         return widget
@@ -1177,6 +1452,7 @@ class MainWindow(QMainWindow):
             self.btn_adaptive_core.setText("自适应识别并提取中心切面")
             self.btn_remove_spikes.setEnabled(True)
             self.btn_remove_spikes.setText("提取真实切面层（去底面/毛刺）")
+            self.btn_interactive_crop.setEnabled(True)
             self.btn_analyze_surface.setEnabled(True)
             self.btn_map_dross.setEnabled(False)
             self.btn_map_dross.setText("3D 凸起映射到 2D 挂渣框")
@@ -1192,6 +1468,7 @@ class MainWindow(QMainWindow):
             self.core_ratio_spin.setEnabled(False)
             self.btn_extract_core.setEnabled(False)
             self.btn_adaptive_core.setEnabled(False)
+            self.btn_interactive_crop.setEnabled(False)
             self.btn_remove_spikes.setEnabled(False)
             self.btn_analyze_surface.setEnabled(False)
             self.btn_map_dross.setEnabled(False)
@@ -1263,6 +1540,19 @@ class MainWindow(QMainWindow):
         self.current_pts = core_pts
         self.current_dross_mask = None
         self._update_point_cloud_view()
+
+    def _on_interactive_crop_clicked(self):
+        if not hasattr(self, 'current_file_path') or not self.current_file_path:
+            return
+            
+        dialog = SectionExtractorDialog(self.current_file_path, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Reload point cloud file
+            self.original_pts = gui_db.parse_point_cloud(self.current_file_path)
+            self.current_pts = self.original_pts.copy()
+            self.current_dross_mask = None
+            self._update_point_cloud_view()
+            self._on_analyze_surface_clicked()
 
     def _on_adaptive_core_clicked(self):
         if (

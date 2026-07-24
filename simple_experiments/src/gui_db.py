@@ -716,6 +716,45 @@ def downsample_point_cloud(pts: np.ndarray, target_count: int = 5000) -> np.ndar
     step = n // target_count
     return pts[::step][:target_count]
 
+def save_point_cloud_data(file_path: str, points: np.ndarray) -> bool:
+    """Saves numpy array of points back to file in PCD, PLY, CSV or ASC format."""
+    ext = os.path.splitext(file_path)[1].lower()
+    try:
+        if ext == ".pcd":
+            # Write PCD ASCII format
+            n = len(points)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write("# .PCD v0.7 - Point Cloud Data file format\n")
+                f.write("VERSION 0.7\n")
+                f.write("FIELDS x y z\n")
+                f.write("SIZE 4 4 4\n")
+                f.write("TYPE F F F\n")
+                f.write("COUNT 1 1 1\n")
+                f.write(f"WIDTH {n}\n")
+                f.write("HEIGHT 1\n")
+                f.write("VIEWPOINT 0 0 0 1 0 0 0\n")
+                f.write(f"POINTS {n}\n")
+                f.write("DATA ascii\n")
+                for pt in points:
+                    f.write(f"{pt[0]:.6f} {pt[1]:.6f} {pt[2]:.6f}\n")
+            return True
+            
+        elif ext == ".csv":
+            # Write CSV format
+            df = pd.DataFrame(points, columns=["x", "y", "z"])
+            df.to_csv(file_path, index=False, header=False)
+            return True
+            
+        else:
+            # ASC / PLY / XYZ / TXT: write space-separated coordinates
+            with open(file_path, "w", encoding="utf-8") as f:
+                for pt in points:
+                    f.write(f"{pt[0]:.6f} {pt[1]:.6f} {pt[2]:.6f}\n")
+            return True
+    except Exception as e:
+        print(f"[DB] Error saving point cloud back to {file_path}: {e}")
+        return False
+
 def extract_core_region(pts: np.ndarray, keep_ratio: float = 0.5) -> np.ndarray:
     """
     Extract the centered region of a section point cloud.
